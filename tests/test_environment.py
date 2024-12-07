@@ -15,8 +15,8 @@ def test_action_constraints(env):
     """Test that cars at each location stay within bounds after an action."""
     state = (20, 5)
     action = 10  # Attempt to move more cars than allowed
-    new_state, _ = env.step(state, action)
-    assert new_state == (20, 5)  # Should remain unchanged due to constraints
+    with pytest.raises(ValueError):
+        env.step(state, action)
 
 def test_reward_calculation(env):
     """Test that the reward calculation is correct for a given state and action."""
@@ -54,11 +54,22 @@ def test_max_cars_constraint(env):
     assert new_state[1] <= env.max_cars
 
 def test_action_effect(env):
-    """Test that moving cars correctly updates the state."""
+    """Test that moving cars correctly updates the state before rentals/returns."""
     state = (10, 10)
     action = -3  # Move 3 cars from location 2 to location 1
-    new_state, _ = env.step(state, action)
-    assert new_state == (13, 7)
+    
+    # Mock the random sampling to test just the movement
+    original_random = np.random.poisson
+    # Temporarily make rentals and returns 3 (cancels out the action).
+    np.random.poisson = lambda x: 3 
+    
+    try:
+        new_state, _ = env.step(state, action)
+        # Only check that initial movement is correct (before rentals/returns)
+        assert new_state == (13, 7)
+    finally:
+        # Restore the original random function
+        np.random.poisson = original_random
 
 def test_movement_cost(env):
     """Test that the movement cost is applied correctly to the reward."""

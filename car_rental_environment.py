@@ -17,7 +17,11 @@ class CarRentalEnv:
         :param action: Number of cars moved from location 1 to location 2 (can be negative)
         :return: new_state, reward
         """
+        if action > self.max_move:
+            raise ValueError(f"Action {action} is greater than the maximum move of {self.max_move}")
+        
         loc_1, loc_2 = state
+
         # Update the state
         loc_1 -= action
         loc_2 += action
