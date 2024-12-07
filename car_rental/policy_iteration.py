@@ -2,6 +2,7 @@ import numpy as np
 from car_rental.environment import CarRentalEnv
 from tqdm import tqdm
 
+
 class PolicyIterationAgent:
     def __init__(self, env, discount_factor=0.9):
         """
@@ -14,7 +15,7 @@ class PolicyIterationAgent:
         self.value_function = np.zeros((env.max_cars + 1, env.max_cars + 1))
         self.policy = np.zeros((env.max_cars + 1, env.max_cars + 1), dtype=int)
 
-    def evaluate_policy(self, max_iterations=1000, threshold=0.1):
+    def evaluate_policy(self, max_iterations=100, threshold=0.1):
         """
         Evaluate the current policy by updating the value function.
         """
@@ -29,9 +30,8 @@ class PolicyIterationAgent:
                     action = self.policy[state]
 
                     new_value = 0
-                    transitions = self.env.get_transition_probs(
-                        state, action
-                    )
+                    transitions = self.env.get_transition_probs(state, action)
+
                     for prob, next_state, reward in transitions:
                         next_value = self.value_function[next_state]
                         new_value += prob * (reward + self.discount_factor * next_value)
@@ -41,6 +41,7 @@ class PolicyIterationAgent:
                     delta = max(delta, abs(current_value - new_value))
 
             if delta < threshold:
+                print(f"Delta converged: {delta}")
                 break
 
     def improve_policy(self):
@@ -56,7 +57,7 @@ class PolicyIterationAgent:
                 current_state = (i, j)
                 old_action = self.policy[current_state]
 
-                for action in self.env.valid_actions(current_state):
+                for action in self.env.get_valid_actions(current_state):
                     expected_value = 0
                     for prob, next_state, reward in env.get_transition_probs(
                         current_state, action
@@ -76,18 +77,17 @@ class PolicyIterationAgent:
                     policy_is_stable = False
 
         return policy_is_stable
-    
+
     def train(self, max_iterations=1000):
         """
         Train the RL agent using a chosen algorithm.
         """
         print("Starting training...")
-        for iteration in range(max_iterations):
+        for _ in range(max_iterations):
             self.evaluate_policy()
             if self.improve_policy():
                 print("Policy converged")
                 break
-
 
     def act(self, state):
         """
