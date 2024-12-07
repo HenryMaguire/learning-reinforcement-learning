@@ -17,3 +17,16 @@
     - Cost: $0 per car moved
 
 
+
+
+# Policy Iteration
+
+1. Start with a simple policy: "Never move any cars" (all zeros)
+2. **Policy evaluation**: Calculate values (total expected future rewards) for each state given by this policy. If I start in state X and follow this policy forever, how much reward do I expect to get?
+    - `(20, 0)` should have low value, because location 2 can't rent any cars.
+    - `(10,10)` should have good value because both locations can support a large demand.
+    - Since no cars are moved by the policy, this establishes a base level of state quality with minimal intervention.
+3. **Policy improvement**: Look at each state and now consider moving cars:
+    - At `(20,0)` your current policy of "Never move any cars" now looks pretty poor. You might see that moving 5 cars is better than 0, because the value function determines that the state after moving 5 cars `(15, 5)` has higher value than the after moving 0.
+    - At `(10, 10)` moving 0 cars might actually be optimal for now.
+4. Repeat.

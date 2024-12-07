@@ -1,6 +1,6 @@
 import numpy as np
 from car_rental.environment import CarRentalEnv
-
+from tqdm import tqdm
 
 class PolicyIterationAgent:
     def __init__(self, env, discount_factor=0.9):
@@ -9,36 +9,85 @@ class PolicyIterationAgent:
         :param env: The environment instance
         :param discount_factor: Discount factor (gamma)
         """
-        self.env = env
+        self.env: CarRentalEnv = env
         self.discount_factor = discount_factor
         self.value_function = np.zeros((env.max_cars + 1, env.max_cars + 1))
         self.policy = np.zeros((env.max_cars + 1, env.max_cars + 1), dtype=int)
 
-    def evaluate_policy(self):
+    def evaluate_policy(self, max_iterations=1000, threshold=0.1):
         """
         Evaluate the current policy by updating the value function.
         """
         print("Evaluating policy...")
-        
+        for _ in tqdm(range(max_iterations)):
+            delta = 0
+            # Iterate over state space.
+            for i in range(self.env.max_cars + 1):
+                for j in range(self.env.max_cars + 1):
+                    state = (i, j)
+                    current_value = self.value_function[state]
+                    action = self.policy[state]
+
+                    new_value = 0
+                    transitions = self.env.get_transition_probs(
+                        state, action
+                    )
+                    for prob, next_state, reward in transitions:
+                        next_value = self.value_function[next_state]
+                        new_value += prob * (reward + self.discount_factor * next_value)
+
+                    self.value_function[state] = new_value
+
+                    delta = max(delta, abs(current_value - new_value))
+
+            if delta < threshold:
+                break
 
     def improve_policy(self):
         """
         Improve the policy based on the current value function.
         """
         print("Improving policy...")
-        # TODO: Implement policy improvement (e.g., greedy policy improvement).
 
+        policy_is_stable = True
+        for i in range(self.env.max_cars + 1):
+            for j in range(self.env.max_cars + 1):
+                action_values = {}
+                current_state = (i, j)
+                old_action = self.policy[current_state]
+
+                for action in self.env.valid_actions(current_state):
+                    expected_value = 0
+                    for prob, next_state, reward in env.get_transition_probs(
+                        current_state, action
+                    ):
+                        expected_value += prob * (
+                            reward
+                            + self.discount_factor * self.value_function[next_state]
+                        )
+
+                    action_values[action] = expected_value
+
+                best_action = max(action_values, key=action_values.get)
+
+                self.policy[current_state] = best_action
+
+                if old_action != best_action:
+                    policy_is_stable = False
+
+        return policy_is_stable
+    
     def train(self, max_iterations=1000):
         """
         Train the RL agent using a chosen algorithm.
         """
         print("Starting training...")
         for iteration in range(max_iterations):
-            print(f"Iteration {iteration + 1}")
             self.evaluate_policy()
-            self.improve_policy()
+            if self.improve_policy():
+                print("Policy converged")
+                break
 
-            # TODO: Add a stopping condition based on policy stability.
 
     def act(self, state):
         """
