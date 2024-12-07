@@ -1,6 +1,8 @@
 import math
 import numpy as np
 
+from car_rental.cache import TransitionCache, poisson_prob
+
 
 class CarRentalEnv:
     def __init__(self):
@@ -10,6 +12,7 @@ class CarRentalEnv:
         self.move_cost = 0
         self.rental_rates = [3, 4]  # Poisson parameters for rentals.
         self.return_rates = [3, 2]  # Poisson parameters for returns.
+        self._transition_cache = TransitionCache()
 
     def step(self, state, action):
         """
@@ -61,19 +64,29 @@ class CarRentalEnv:
         Get probabilities and rewards for all possible next states.
         Returns: list of (probability, next_state, reward) tuples
         """
+        cached = self._transition_cache.get(state, action)
+        if cached:
+            return cached
+
         loc_1, loc_2 = state
         # First apply the action
         loc_1_after_move = max(0, min(self.max_cars, loc_1 - action))
         loc_2_after_move = max(0, min(self.max_cars, loc_2 + action))
         movement_cost = abs(action) * self.move_cost
-        
+
         transitions = []
         # Consider reasonable ranges for Poisson distributions (e.g., mean ± 3 std dev)
-        max_rental_1 = min(loc_1_after_move, int(self.rental_rates[0] + 3 * np.sqrt(self.rental_rates[0])))
-        max_rental_2 = min(loc_2_after_move, int(self.rental_rates[1] + 3 * np.sqrt(self.rental_rates[1])))
+        max_rental_1 = min(
+            loc_1_after_move,
+            int(self.rental_rates[0] + 3 * np.sqrt(self.rental_rates[0])),
+        )
+        max_rental_2 = min(
+            loc_2_after_move,
+            int(self.rental_rates[1] + 3 * np.sqrt(self.rental_rates[1])),
+        )
         max_return_1 = int(self.return_rates[0] + 3 * np.sqrt(self.return_rates[0]))
         max_return_2 = int(self.return_rates[1] + 3 * np.sqrt(self.return_rates[1]))
-        
+
         for r1 in range(max_rental_1 + 1):
             p_r1 = self._poisson_prob(self.rental_rates[0], r1)
             if p_r1 < min_prob:
@@ -99,20 +112,23 @@ class CarRentalEnv:
 
                         if p > min_prob:  # Ignore very unlikely transitions
                             # Calculate next state
-                            next_loc1 = max(0, min(self.max_cars, 
-                                                 loc_1_after_move - r1 + ret1))
-                            next_loc2 = max(0, min(self.max_cars, 
-                                                 loc_2_after_move - r2 + ret2))
+                            next_loc1 = max(
+                                0, min(self.max_cars, loc_1_after_move - r1 + ret1)
+                            )
+                            next_loc2 = max(
+                                0, min(self.max_cars, loc_2_after_move - r2 + ret2)
+                            )
                             # Calculate reward
                             reward = (r1 + r2) * self.rental_reward - movement_cost
                             transitions.append((p, (next_loc1, next_loc2), reward))
-        
+
+        self._transition_cache.set(state, action, transitions)
         return transitions
 
     @staticmethod
     def _poisson_prob(lambda_param, n):
         """Calculate Poisson probability mass function."""
-        return (lambda_param ** n * np.exp(-lambda_param)) / math.factorial(n)
+        return poisson_prob(lambda_param, n)
 
     def get_valid_actions(self, state):
         """Get list of valid actions for a state."""

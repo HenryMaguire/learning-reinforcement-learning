@@ -20,7 +20,7 @@ class PolicyIterationAgent:
         Evaluate the current policy by updating the value function.
         """
         print("Evaluating policy...")
-        for _ in tqdm(range(max_iterations)):
+        for iteration in range(max_iterations):
             delta = 0
             # Iterate over state space.
             for i in range(self.env.max_cars + 1):
@@ -43,6 +43,8 @@ class PolicyIterationAgent:
             if delta < threshold:
                 print(f"Delta converged: {delta}")
                 break
+            
+            print(f"Iteration {iteration} complete")
 
     def improve_policy(self):
         """
@@ -83,7 +85,7 @@ class PolicyIterationAgent:
         Train the RL agent using a chosen algorithm.
         """
         print("Starting training...")
-        for _ in range(max_iterations):
+        for _ in tqdm(range(max_iterations)):
             self.evaluate_policy()
             if self.improve_policy():
                 print("Policy converged")
