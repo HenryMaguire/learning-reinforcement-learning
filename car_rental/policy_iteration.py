@@ -2,6 +2,8 @@ import numpy as np
 from car_rental.environment import CarRentalEnv
 from tqdm import tqdm
 
+from car_rental.plot_policy import save_policy_plot
+
 
 class PolicyIterationAgent:
     def __init__(self, env, discount_factor=0.9):
@@ -43,7 +45,7 @@ class PolicyIterationAgent:
             if delta < threshold:
                 print(f"Delta converged: {delta}")
                 break
-            
+
             print(f"Iteration {iteration} complete")
 
     def improve_policy(self):
@@ -118,7 +120,7 @@ class PolicyIterationAgent:
 
 if __name__ == "__main__":
     # Initialize the environment
-    env = CarRentalEnv()
+    env = CarRentalEnv(move_cost=2)
 
     # Initialize the RL agent
     agent = PolicyIterationAgent(env)
@@ -133,3 +135,4 @@ if __name__ == "__main__":
 
     # Save the policy
     agent.save_policy("car_rental_policy.npy")
+    save_policy_plot(agent.policy)

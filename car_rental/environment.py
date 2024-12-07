@@ -5,13 +5,13 @@ from car_rental.cache import TransitionCache, poisson_prob
 
 
 class CarRentalEnv:
-    def __init__(self):
-        self.max_cars = 20
-        self.max_move = 5
-        self.rental_reward = 10
-        self.move_cost = 0
-        self.rental_rates = [3, 4]  # Poisson parameters for rentals.
-        self.return_rates = [3, 2]  # Poisson parameters for returns.
+    def __init__(self, max_cars=20, max_move=5, rental_reward=10, move_cost=0, rental_rates=[3, 4], return_rates=[3, 2]):
+        self.max_cars = max_cars
+        self.max_move = max_move
+        self.rental_reward = rental_reward
+        self.move_cost = move_cost
+        self.rental_rates = rental_rates  # Poisson parameters for rentals.
+        self.return_rates = return_rates  # Poisson parameters for returns.
         self._transition_cache = TransitionCache()
 
     def step(self, state, action):
