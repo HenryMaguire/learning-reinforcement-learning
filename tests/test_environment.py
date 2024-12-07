@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from car_rental_environment import CarRentalEnv
+from car_rental.environment import CarRentalEnv
 
 @pytest.fixture
 def env():
@@ -75,6 +75,7 @@ def test_movement_cost(env):
     """Test that the movement cost is applied correctly to the reward."""
     state = (10, 10)
     action = 4  # Move 4 cars
+    env.move_cost = 2
     _, reward = env.step(state, action)
     expected_cost = env.move_cost * abs(action)
     assert reward < env.rental_reward * (10 + 10) - expected_cost
