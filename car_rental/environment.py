@@ -5,7 +5,15 @@ from car_rental.cache import TransitionCache, poisson_prob
 
 
 class CarRentalEnv:
-    def __init__(self, max_cars=20, max_move=5, rental_reward=10, move_cost=0, rental_rates=[3, 4], return_rates=[3, 2]):
+    def __init__(
+        self,
+        max_cars=20,
+        max_move=5,
+        rental_reward=10,
+        move_cost=0,
+        rental_rates=[3, 4],
+        return_rates=[3, 2],
+    ):
         self.max_cars = max_cars
         self.max_move = max_move
         self.rental_reward = rental_reward
@@ -14,44 +22,6 @@ class CarRentalEnv:
         self.return_rates = return_rates  # Poisson parameters for returns.
         self._transition_cache = TransitionCache()
 
-    def step(self, state, action):
-        """
-        Simulates one time step.
-        :param state: (x, y) - cars at location 1 and 2
-        :param action: Number of cars moved from location 1 to location 2 (can be negative)
-        :return: new_state, reward
-        """
-        if action > self.max_move:
-            raise ValueError(
-                f"Action {action} is greater than the maximum move of {self.max_move}"
-            )
-
-        loc_1, loc_2 = state
-
-        # Update the state
-        loc_1 -= action
-        loc_2 += action
-        # Clamp the state to be between 0 and the maximum number of cars.
-        loc_1 = max(0, min(self.max_cars, loc_1))
-        loc_2 = max(0, min(self.max_cars, loc_2))
-        movement_cost = abs(action) * self.move_cost
-
-        # Sample the number of attempted car rentals and car returns.
-        # Can never rent more cars out than are at the location.
-        rentals_1 = min(loc_1, np.random.poisson(self.rental_rates[0]))
-        rentals_2 = min(loc_2, np.random.poisson(self.rental_rates[1]))
-        returns_1 = np.random.poisson(self.return_rates[0])
-        returns_2 = np.random.poisson(self.return_rates[1])
-
-        # Update the state again to account for rentals and returns.
-        loc_1 = max(0, min(self.max_cars, loc_1 - rentals_1 + returns_1))
-        loc_2 = max(0, min(self.max_cars, loc_2 - rentals_2 + returns_2))
-
-        # Only get reward for new rentals.
-        reward = (rentals_1 + rentals_2) * self.rental_reward - movement_cost
-
-        return (loc_1, loc_2), reward
-
     def reset(self):
         """
         Resets the environment to the initial state.
@@ -59,7 +29,7 @@ class CarRentalEnv:
         # Start with 10 cars at each location.
         return (10, 10)
 
-    def get_transition_probs(self, state, action, min_prob=1e-4):
+    def get_transition_probs(self, state, action=0, min_prob=1e-4):
         """
         Get probabilities and rewards for all possible next states.
         Returns: list of (probability, next_state, reward) tuples
@@ -124,6 +94,12 @@ class CarRentalEnv:
 
         self._transition_cache.set(state, action, transitions)
         return transitions
+
+    def get_next_state(self, state, action):
+        loc_1, loc_2 = state
+        loc_1 -= action
+        loc_2 += action
+        return (loc_1, loc_2)
 
     @staticmethod
     def _poisson_prob(lambda_param, n):

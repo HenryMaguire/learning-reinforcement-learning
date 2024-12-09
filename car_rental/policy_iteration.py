@@ -62,16 +62,16 @@ class PolicyIterationAgent:
                 old_action = self.policy[current_state]
 
                 for action in self.env.get_valid_actions(current_state):
-                    expected_value = 0
-                    for prob, next_state, reward in env.get_transition_probs(
+                    action_value = 0
+                    for prob, next_state, reward in self.env.get_transition_probs(
                         current_state, action
                     ):
-                        expected_value += prob * (
-                            reward
-                            + self.discount_factor * self.value_function[next_state]
+                        next_value = self.value_function[next_state]
+                        action_value += prob * (
+                            reward + self.discount_factor * next_value
                         )
 
-                    action_values[action] = expected_value
+                    action_values[action] = action_value
 
                 best_action = max(action_values, key=action_values.get)
 
@@ -82,13 +82,13 @@ class PolicyIterationAgent:
 
         return policy_is_stable
 
-    def train(self, max_iterations=1000):
+    def train(self, max_iterations=1000, threshold=0.1):
         """
         Train the RL agent using a chosen algorithm.
         """
         print("Starting training...")
         for _ in tqdm(range(max_iterations)):
-            self.evaluate_policy()
+            self.evaluate_policy(threshold=threshold)
             if self.improve_policy():
                 print("Policy converged")
                 break
@@ -120,13 +120,13 @@ class PolicyIterationAgent:
 
 if __name__ == "__main__":
     # Initialize the environment
-    env = CarRentalEnv(move_cost=2)
+    env = CarRentalEnv()
 
     # Initialize the RL agent
     agent = PolicyIterationAgent(env)
 
     # Train the agent (policy iteration, value iteration, etc.)
-    agent.train(max_iterations=1000)
+    agent.train(max_iterations=1000, threshold=0.01)
 
     # Test the policy
     test_state = (10, 10)  # Example state
@@ -134,5 +134,5 @@ if __name__ == "__main__":
     print(f"Best action for state {test_state}: {best_action}")
 
     # Save the policy
-    agent.save_policy("car_rental_policy.npy")
-    save_policy_plot(agent.policy)
+    agent.save_policy("policy_iteration_policy.npy")
+    save_policy_plot(agent.policy, "policy_iteration_policy.png")

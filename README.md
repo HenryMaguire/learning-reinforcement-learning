@@ -16,7 +16,11 @@
         - Location 2: $\lambda_p = 4$
     - Cost: $0 per car moved
 
-
+## Intuition:
+Location 1 gets lower average demand, with an equal distribution of demand and return rate.
+Location 2 gets higher average demand, with more requests than returns.
+This means that location 2 might run out of cars more often unless we move cars from location 1 to location 2.
+We might expect to see an asymmetrical policy, with more cars moved from location 1 to location 2 when n_1 > n_2 than the other way around.
 
 
 # Policy Iteration
