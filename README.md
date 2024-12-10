@@ -34,3 +34,11 @@ We might expect to see an asymmetrical policy, with more cars moved from locatio
     - At `(20,0)` your current policy of "Never move any cars" now looks pretty poor. You might see that moving 5 cars is better than 0, because the value function determines that the state after moving 5 cars `(15, 5)` has higher value than the after moving 0.
     - At `(10, 10)` moving 0 cars might actually be optimal for now.
 4. Repeat.
+
+# Value Iteration
+
+1. Start with zero value function.
+2. Iteratively update the value function for each state using the Bellman optimality equation.
+3. At each state, consider the value of taking each action.
+4. Update the value function for the current state based on the value of the best action.
+5. Repeat until the value function converges.
