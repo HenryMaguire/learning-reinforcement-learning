@@ -1,7 +1,6 @@
-import math
 import numpy as np
 
-from car_rental.cache import TransitionCache, poisson_prob
+from car_rental.helpers import TransitionCache, poisson_prob
 
 
 class CarRentalEnv:
@@ -28,6 +27,12 @@ class CarRentalEnv:
         """
         # Start with 10 cars at each location.
         return (10, 10)
+
+    def sample_step(self, state, action):
+        probs, next_states, rewards = self.get_transition_probs(state, action=action)
+        ids = range(len(next_states))
+        choice = np.random.choice(ids, p=probs)
+        return next_states[choice], rewards[choice]
 
     def get_transition_probs(self, state, action=0, min_prob=1e-4):
         """
@@ -106,7 +111,7 @@ class CarRentalEnv:
         """Calculate Poisson probability mass function."""
         return poisson_prob(lambda_param, n)
 
-    def get_valid_actions(self, state):
+    def get_valid_actions(self, state) -> list[int]:
         """Get list of valid actions for a state."""
         loc_1, loc_2 = state
         actions = []
