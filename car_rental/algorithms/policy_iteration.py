@@ -1,19 +1,17 @@
 import numpy as np
-from car_rental.environment import CarRentalEnv
+from car_rental.algorithms.base_agent import BaseAgent
 from tqdm import tqdm
 
 
-class PolicyIterationAgent:
+class PolicyIterationAgent(BaseAgent):
     def __init__(self, env, discount_factor=0.9):
         """
         Initialize the RL agent.
         :param env: The environment instance
         :param discount_factor: Discount factor (gamma)
         """
-        self.env: CarRentalEnv = env
-        self.discount_factor = discount_factor
-        self.value_function = np.zeros((env.max_cars + 1, env.max_cars + 1))
-        self.policy = np.zeros((env.max_cars + 1, env.max_cars + 1), dtype=int)
+        super().__init__(env, discount_factor)
+        self.value_function = np.zeros(env.state_space_dims)
 
     def evaluate_policy(self, max_iterations=100, threshold=0.1):
         """
@@ -22,7 +20,6 @@ class PolicyIterationAgent:
         print("Evaluating policy...")
         for iteration in range(max_iterations):
             delta = 0
-            # Iterate over state space.
             for i in range(self.env.max_cars + 1):
                 for j in range(self.env.max_cars + 1):
                     state = (i, j)
@@ -31,7 +28,6 @@ class PolicyIterationAgent:
 
                     new_value = 0
                     transitions = self.env.get_transition_probs(state, action)
-
                     for prob, next_state, reward in transitions:
                         next_value = self.value_function[next_state]
                         new_value += prob * (reward + self.discount_factor * next_value)
@@ -90,27 +86,3 @@ class PolicyIterationAgent:
             if self.improve_policy():
                 print("Policy converged")
                 break
-
-    def act(self, state):
-        """
-        Get the best action for a given state based on the current policy.
-        :param state: Current state (tuple)
-        :return: Action
-        """
-        return self.policy[state]
-
-    def save_policy(self, filename):
-        """
-        Save the policy to a file.
-        :param filename: Name of the file
-        """
-        np.save(filename, self.policy)
-        print(f"Policy saved to {filename}")
-
-    def load_policy(self, filename):
-        """
-        Load the policy from a file.
-        :param filename: Name of the file
-        """
-        self.policy = np.load(filename)
-        print(f"Policy loaded from {filename}")

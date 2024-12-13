@@ -11,7 +11,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "algorithm",
-        choices=["policy_iteration", "value_iteration"],
+        choices=["policy_iteration", "value_iteration", "q_learning"],
         help="Algorithm to use for training the agent.",
     )
     args = parser.parse_args()

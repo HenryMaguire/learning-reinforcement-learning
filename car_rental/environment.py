@@ -13,13 +13,14 @@ class CarRentalEnv:
         rental_rates=[3, 4],
         return_rates=[3, 2],
     ):
-        self.max_cars = max_cars
+        self.max_cars = int(max_cars)
         self.max_move = max_move
         self.rental_reward = rental_reward
         self.move_cost = move_cost
         self.rental_rates = rental_rates  # Poisson parameters for rentals.
         self.return_rates = return_rates  # Poisson parameters for returns.
         self._transition_cache = TransitionCache()
+        self.state_space_dims = (max_cars + 1, max_cars + 1)
 
     def reset(self):
         """
@@ -29,12 +30,17 @@ class CarRentalEnv:
         return (10, 10)
 
     def sample_step(self, state, action):
-        probs, next_states, rewards = self.get_transition_probs(state, action=action)
+        transitions = self.get_transition_probs(state, action=action)
+        if len(transitions):
+            probs, next_states, rewards = zip(*transitions)
+        else:
+            return None, None
         ids = range(len(next_states))
+        probs = probs / np.sum(probs)
         choice = np.random.choice(ids, p=probs)
         return next_states[choice], rewards[choice]
 
-    def get_transition_probs(self, state, action=0, min_prob=1e-4):
+    def get_transition_probs(self, state, action=0, min_prob=1e-5):
         """
         Get probabilities and rewards for all possible next states.
         Returns: list of (probability, next_state, reward) tuples
@@ -51,13 +57,17 @@ class CarRentalEnv:
 
         transitions = []
         # Consider reasonable ranges for Poisson distributions (e.g., mean ± 3 std dev)
-        max_rental_1 = min(
-            loc_1_after_move,
-            int(self.rental_rates[0] + 3 * np.sqrt(self.rental_rates[0])),
+        max_rental_1 = int(
+            min(
+                loc_1_after_move,
+                self.rental_rates[0] + 3 * np.sqrt(self.rental_rates[0]),
+            )
         )
-        max_rental_2 = min(
-            loc_2_after_move,
-            int(self.rental_rates[1] + 3 * np.sqrt(self.rental_rates[1])),
+        max_rental_2 = int(
+            min(
+                loc_2_after_move,
+                self.rental_rates[1] + 3 * np.sqrt(self.rental_rates[1]),
+            )
         )
         max_return_1 = int(self.return_rates[0] + 3 * np.sqrt(self.return_rates[0]))
         max_return_2 = int(self.return_rates[1] + 3 * np.sqrt(self.return_rates[1]))
