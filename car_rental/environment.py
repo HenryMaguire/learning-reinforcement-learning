@@ -22,10 +22,15 @@ class CarRentalEnv:
         self._transition_cache = TransitionCache()
         self.state_space_dims = (max_cars + 1, max_cars + 1)
 
-    def reset(self):
+    def reset(self, random_state=False):
         """
         Resets the environment to the initial state.
         """
+        if random_state:
+            return (
+                np.random.randint(0, self.max_cars + 1),
+                np.random.randint(0, self.max_cars + 1),
+            )
         # Start with 10 cars at each location.
         return (10, 10)
 

@@ -11,7 +11,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "algorithm",
-        choices=["policy_iteration", "value_iteration", "q_learning"],
+        choices=["policy_iteration", "value_iteration", "q_learning", "monte_carlo"],
         help="Algorithm to use for training the agent.",
     )
     args = parser.parse_args()
@@ -23,7 +23,8 @@ if __name__ == "__main__":
         from car_rental.algorithms.value_iteration import ValueIterationAgent as Agent
     elif args.algorithm == "q_learning":
         from car_rental.algorithms.q_learning import QLearningAgent as Agent
-
+    elif args.algorithm == "monte_carlo":
+        from car_rental.algorithms.monte_carlo import MonteCarloAgent as Agent
     # Initialize the environment
     env = CarRentalEnv()
 
@@ -31,7 +32,7 @@ if __name__ == "__main__":
     agent = Agent(env)
 
     # Train the agent (policy iteration, value iteration, etc.)
-    agent.train(max_iterations=1000, threshold=0.01)
+    agent.train()
 
     # Test the policy
     test_state = (10, 10)  # Example state
