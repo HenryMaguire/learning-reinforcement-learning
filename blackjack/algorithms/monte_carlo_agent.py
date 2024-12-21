@@ -24,21 +24,40 @@ class MonteCarloAgent:
         """
         Train the MCRL agent
         """
+        wins = 0
+        episode_window = 10000  # Track win rate over last 1000 episodes
+        win_rates = []
+
         for episode in range(num_episodes):
-            episode_data = []  # Store (state, action, reward) for the episode
+            episode_data = []
             state = self.env.reset()
             done = False
+
             while not done:
-                action = self.policy.get(
-                    state, self.env.action_space[np.random.randint(2)]
-                )
+                self.policy[state] = np.argmax(self.Q[state])
                 if np.random.rand() < self.episilon:
                     action = self.env.action_space[np.random.randint(2)]
-                state, reward, done = self.env.step(action)
+                else:
+                    action = self.policy.get(
+                        state, self.env.action_space[np.random.randint(2)]
+                    )
+
+                next_state, reward, done = self.env.step(action)
                 episode_data.append((state, action, reward))
+                state = next_state
+
+            # Track wins
+            if reward == 1:
+                wins += 1
+
+            if (episode + 1) % episode_window == 0:
+                win_rate = wins / episode_window
+                win_rates.append(win_rate)
+                print(f"Episode {episode + 1}/{num_episodes}, Win Rate: {win_rate:.3f}")
+                wins = 0  # Reset counter
 
             G = 0
-            for state, action, reward in episode_data:
+            for state, action, reward in reversed(episode_data):
                 G = reward + self.discount_factor * G
                 self.returns_count[state][action] += 1
                 self.Q[state][action] += (
@@ -87,11 +106,18 @@ class MonteCarloAgent:
         # Calculate values
         for i, player in enumerate(player_sums):
             for j, dealer in enumerate(dealer_cards):
-                # Get max value for each state
+                # Get max value for each state instead of sum
                 state_no_ace = (player, dealer, False)
                 state_ace = (player, dealer, True)
-                Z_no_ace[i][j] = np.sum(self.Q[state_no_ace])
-                Z_ace[i][j] = np.sum(self.Q[state_ace])
+                policy_action_no_ace = self.policy.get(state_no_ace, 0)
+                policy_action_ace = self.policy.get(state_ace, 0)
+
+                Z_no_ace[i][j] = self.Q[state_no_ace][policy_action_no_ace]
+                Z_ace[i][j] = self.Q[state_ace][policy_action_ace]
+
+        # Flip arrays vertically to match conventional representation
+        Z_no_ace = np.flipud(Z_no_ace)
+        Z_ace = np.flipud(Z_ace)
 
         # Create the plots
         fig = plt.figure(figsize=(15, 6))
@@ -180,7 +206,7 @@ class MonteCarloAgent:
 if __name__ == "__main__":
     env = BlackjackEnv()
     agent = MonteCarloAgent(env)
-    agent.train(num_episodes=100000)
+    agent.train(num_episodes=1000000)
     agent.save_policy("monte_carlo_policy.npy")
     agent.plot_value_function(show=True, save_path="monte_carlo_value_function.png")
     agent.plot_policy(show=True, save_path="monte_carlo_policy.png")

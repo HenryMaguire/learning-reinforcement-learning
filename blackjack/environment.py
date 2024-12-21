@@ -6,7 +6,7 @@ class BlackjackEnv:
         # State space: current sum (12-21), dealer's card (1-10), usable ace (0 or 1)
         self.state_space = (
             range(12, 22),  # Player's sum (12 to 21)
-            range(1, 11),  # Dealer's showing card (1-10)
+            range(1, 11),  # Dealer's showing card (1-10, where 10 includes face cards)
             [0, 1],  # Usable ace (0 or 1)
         )
         self.state_space_dims = (10, 10, 2)
@@ -20,14 +20,23 @@ class BlackjackEnv:
         self.usable_ace = None
 
     def reset(self) -> tuple[int, int, int]:
-        # Initialize player's sum to a random value between 12 and 21
-        self.current_sum = np.random.randint(12, 22)
+        # Deal two cards to player
+        card1 = min(10, np.random.randint(1, 14))  # Ace=1, Face cards=10
+        card2 = min(10, np.random.randint(1, 14))
 
-        # Dealer's showing card is between 1 and 10
-        self.dealer_card = np.random.randint(1, 11)
+        # Handle aces
+        self.current_sum = card1 + card2
+        self.usable_ace = 1 if (card1 == 1 or card2 == 1) else 0
 
-        # Usable ace: randomly yes (1) or no (0)
-        self.usable_ace = np.random.choice([0, 1])
+        if self.usable_ace and self.current_sum + 10 <= 21:
+            self.current_sum += 10
+
+        if self.current_sum < 12:
+            # Auto twist
+            self._twist()
+
+        # Dealer's up card
+        self.dealer_card = self._draw_card()
 
         return self._get_obs()
 
@@ -41,15 +50,26 @@ class BlackjackEnv:
             return self._twist()
 
     def _stick(self) -> tuple[tuple, float, bool]:
-        # Simulate dealer's behavior: dealer keeps hitting until 17 or above
-        dealer_sum = self.dealer_card + np.random.randint(1, 11)
+        # Initial dealer hand
+        dealer_sum = self.dealer_card
+        dealer_ace = 1 if self.dealer_card == 1 else 0
+        if dealer_ace:
+            dealer_sum += 10
+
+        # Keep hitting until 17 or above
         while dealer_sum < 17:
-            dealer_sum += np.random.randint(1, 11)
+            card = self._draw_card()
+            dealer_sum += card
+            if card == 1 and dealer_ace == 1 and dealer_sum + 10 <= 21:
+                dealer_sum += 10
+                dealer_ace = 1
+            elif dealer_ace and dealer_sum > 21:
+                dealer_sum -= 10
+                dealer_ace = 0
 
         if self.current_sum > 21:
             reward = -1
         elif dealer_sum > 21 or self.current_sum > dealer_sum:
-            # Dealer busts or player wins
             reward = 1
         elif self.current_sum == dealer_sum:
             reward = 0
@@ -60,12 +80,13 @@ class BlackjackEnv:
         return self._get_obs(), reward, done
 
     def _twist(self) -> tuple[tuple, float, bool]:
-        new_card = np.random.randint(1, 11)
-        # print("New card:", new_card)
+        new_card = self._draw_card()
         self.current_sum += new_card
 
-        if self.usable_ace and self.current_sum > 21:
-            # print("Using ace to avoid bust")
+        if new_card == 1 and not self.usable_ace and self.current_sum + 10 <= 21:
+            self.current_sum += 10
+            self.usable_ace = 1
+        elif self.usable_ace and self.current_sum > 21:
             self.current_sum -= 10
             self.usable_ace = 0
 
@@ -77,6 +98,10 @@ class BlackjackEnv:
             done = False
 
         return self._get_obs(), reward, done
+
+    def _draw_card(self) -> int:
+        card = np.random.randint(1, 14)  # 1-13 for Ace through King
+        return min(10, card)  # Face cards = 10
 
 
 if __name__ == "__main__":
