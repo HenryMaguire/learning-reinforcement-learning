@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 
 class MonteCarloAgent:
-    def __init__(self, env, discount_factor=0.9):
+    def __init__(self, env, discount_factor=0.9, episilon=0.1):
         """
         Initialize the RL agent.
         :param env: The environment instance
@@ -18,6 +18,7 @@ class MonteCarloAgent:
         self.Q = defaultdict(lambda: np.zeros(len(self.env.action_space)))
         self.returns_count = defaultdict(lambda: np.zeros(2))
         self.policy = {}  # Current policy
+        self.episilon = episilon
 
     def train(self, num_episodes=10000, threshold=0.1):
         """
@@ -31,6 +32,8 @@ class MonteCarloAgent:
                 action = self.policy.get(
                     state, self.env.action_space[np.random.randint(2)]
                 )
+                if np.random.rand() < self.episilon:
+                    action = self.env.action_space[np.random.randint(2)]
                 state, reward, done = self.env.step(action)
                 episode_data.append((state, action, reward))
 
