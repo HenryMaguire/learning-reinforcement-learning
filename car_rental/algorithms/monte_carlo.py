@@ -1,6 +1,7 @@
 from enum import StrEnum
 import numpy as np
-from car_rental.algorithms.base_agent import BaseAgent
+from blackjack.algorithms.base_agent import BaseAgent
+from blackjack.environment import BlackjackEnv
 
 
 class VisitModes(StrEnum):
@@ -90,3 +91,12 @@ class MonteCarloAgent(BaseAgent):
 
             if episode_num % 10 == 0:
                 print(f"Episode {episode_num}, Best Return: {best_return:.2f}")
+
+
+if __name__ == "__main__":
+    env = BlackjackEnv()
+    agent = MonteCarloAgent(env)
+    agent.train(n_episodes=100000)
+    agent.save_policy("car_rental_policy.npy")
+    agent.plot_value_function(show=True, save_path="car_rental_value_function.png")
+    agent.plot_policy(show=True, save_path="car_rental_policy.png")

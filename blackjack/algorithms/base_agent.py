@@ -1,5 +1,6 @@
 import numpy as np
 from blackjack.environment import BlackjackEnv
+import matplotlib.pyplot as plt
 
 
 class BaseAgent:
@@ -11,7 +12,9 @@ class BaseAgent:
         """
         self.env: BlackjackEnv = env
         self.discount_factor = discount_factor
-        self.policy = np.zeros(env.state_space_dims, dtype=int)
+        self.policy = (
+            {}
+        )  # Changed from np.zeros to dict for sparse state representation
 
     def train(self, max_iterations=1000, threshold=0.1):
         """
@@ -19,26 +22,85 @@ class BaseAgent:
         """
         raise NotImplementedError("Train method not implemented")
 
-    def act(self, state):
+    def plot_value_function(self, show=True, save_path=None):
         """
-        Get the best action for a given state based on the current policy.
-        :param state: Current state (tuple)
-        :return: Action
+        Plot the value function as 3D surface plots.
         """
-        return self.policy[state]
+        player_sums = range(12, 22)
+        dealer_cards = range(1, 11)
+        X, Y = np.meshgrid(dealer_cards, player_sums)
+        Z_no_ace = np.zeros_like(X, dtype=float)
+        Z_ace = np.zeros_like(X, dtype=float)
 
-    def save_policy(self, filename):
-        """
-        Save the policy to a file.
-        :param filename: Name of the file
-        """
-        np.save(filename, self.policy)
-        print(f"Policy saved to {filename}")
+        # Calculate values
+        for i, player in enumerate(player_sums):
+            for j, dealer in enumerate(dealer_cards):
+                state_no_ace = (player, dealer, 0)
+                state_ace = (player, dealer, 1)
+                policy_action_no_ace = self.policy.get(state_no_ace, 0)
+                policy_action_ace = self.policy.get(state_ace, 0)
 
-    def load_policy(self, filename):
+                Z_no_ace[i][j] = self.Q[state_no_ace][policy_action_no_ace]
+                Z_ace[i][j] = self.Q[state_ace][policy_action_ace]
+
+        Z_no_ace = np.flipud(Z_no_ace)
+        Z_ace = np.flipud(Z_ace)
+
+        # Create plots
+        fig = plt.figure(figsize=(15, 6))
+
+        # Plot no usable ace
+        ax1 = fig.add_subplot(121, projection="3d")
+        surf1 = ax1.plot_surface(X, Y, Z_no_ace, cmap=plt.cm.viridis)
+        ax1.set_title("Value Function\nNo Usable Ace")
+        ax1.set_xlabel("Dealer Showing")
+        ax1.set_ylabel("Player Sum")
+        ax1.set_zlabel("Value")
+        fig.colorbar(surf1)
+
+        # Plot usable ace
+        ax2 = fig.add_subplot(122, projection="3d")
+        surf2 = ax2.plot_surface(X, Y, Z_ace, cmap=plt.cm.viridis)
+        ax2.set_title("Value Function\nUsable Ace")
+        ax2.set_xlabel("Dealer Showing")
+        ax2.set_ylabel("Player Sum")
+        ax2.set_zlabel("Value")
+        fig.colorbar(surf2)
+
+        if save_path:
+            plt.savefig(save_path)
+        if show:
+            plt.show()
+        plt.close()
+
+    def plot_policy(self, show=True, save_path=None):
         """
-        Load the policy from a file.
-        :param filename: Name of the file
+        Plot the optimal policy as 2D grids.
         """
-        self.policy = np.load(filename)
-        print(f"Policy loaded from {filename}")
+        player_sums = range(12, 22)
+        dealer_cards = range(1, 11)
+
+        policy_no_ace = np.zeros((len(player_sums), len(dealer_cards)))
+        policy_ace = np.zeros((len(player_sums), len(dealer_cards)))
+
+        for i, player in enumerate(player_sums):
+            for j, dealer in enumerate(dealer_cards):
+                state_no_ace = (player, dealer, 0)
+                state_ace = (player, dealer, 1)
+                policy_no_ace[i][j] = np.argmax(self.Q[state_no_ace])
+                policy_ace[i][j] = np.argmax(self.Q[state_ace])
+
+        # Flip arrays vertically
+        policy_no_ace = np.flipud(policy_no_ace)
+        policy_ace = np.flipud(policy_ace)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+
+        im1 = ax1.imshow(policy_no_ace, cmap="RdYlGn", aspect="auto")
+        ax1.set_title("Optimal Policy\nNo Usable Ace")
+        ax1.set_xlabel("Dealer Showing")
+        ax1.set_ylabel("Player Sum")
+        ax1.set_xticks(range(len(dealer_cards)))
+        ax1.set_yticks(range(len(player_sums)))
+        ax1.set_xticklabels(dealer_cards)
+        ax1.set_yticklabels(reversed(player_sums))
