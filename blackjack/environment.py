@@ -9,6 +9,7 @@ class BlackjackEnv:
             range(1, 11),  # Dealer's showing card (1-10)
             [0, 1],  # Usable ace (0 or 1)
         )
+        self.state_space_dims = (10, 10, 2)
 
         # Action space: stick (0) or twist (1)
         self.action_space = [0, 1]
@@ -60,11 +61,11 @@ class BlackjackEnv:
 
     def _twist(self) -> tuple[tuple, float, bool]:
         new_card = np.random.randint(1, 11)
-        print("New card:", new_card)
+        # print("New card:", new_card)
         self.current_sum += new_card
 
         if self.usable_ace and self.current_sum > 21:
-            print("Using ace to avoid bust")
+            # print("Using ace to avoid bust")
             self.current_sum -= 10
             self.usable_ace = 0
 
