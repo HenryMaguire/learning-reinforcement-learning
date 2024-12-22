@@ -14,7 +14,7 @@ class TemporalDifferenceAgent(BaseAgent):
         self.learning_rate = learning_rate
         self.Q = defaultdict(lambda: np.zeros(len(self.env.action_space)))
 
-    def train(self, num_episodes=1000):
+    def train(self, num_episodes=1000, method="sarsa"):
         wins = 0
         episode_window = 10000
         win_rates = []
@@ -28,22 +28,33 @@ class TemporalDifferenceAgent(BaseAgent):
 
             while not done:
                 if np.random.rand() < self.epsilon:
-                    action = self.env.action_space[np.random.randint(2)]
+                    action = self.env.action_space[
+                        np.random.randint(len(self.env.action_space))
+                    ]
                 else:
                     action = np.argmax(self.Q[state])
 
                 next_state, reward, done = self.env.step(action)
 
-                next_value = np.max(self.Q[next_state]) if not done else 0
-                target = reward + self.discount_factor * next_value
+                if method == "sarsa":
+                    next_action = np.argmax(self.Q[next_state]) if not done else 0
+                    target = (
+                        reward + self.discount_factor * self.Q[next_state][next_action]
+                    )
+                else:
+                    target = (
+                        reward + self.discount_factor * np.max(self.Q[next_state])
+                        if not done
+                        else 0
+                    )
+
                 self.Q[state][action] += self.learning_rate * (
                     target - self.Q[state][action]
                 )
-
                 self.policy[state] = np.argmax(self.Q[state])
                 state = next_state
 
-            if reward == 1:
+            if reward == 1:  # Consider generalizing this check
                 wins += 1
 
             if (episode + 1) % episode_window == 0:
@@ -57,11 +68,17 @@ class TemporalDifferenceAgent(BaseAgent):
 
         return win_rates
 
+    def train_sarsa(self, num_episodes=1000):
+        return self.train(num_episodes, method="sarsa")
+
+    def train_q_learning(self, num_episodes=1000):
+        return self.train(num_episodes, method="q_learning")
+
 
 if __name__ == "__main__":
     env = BlackjackEnv()
     agent = TemporalDifferenceAgent(env)
-    agent.train(num_episodes=1000000)
+    agent.train_q_learning(num_episodes=1000000)
     agent.save_policy("temporal_difference_policy.npy")
     # agent.plot_value_function(
     #     show=True, save_path="temporal_difference_value_function.png"
