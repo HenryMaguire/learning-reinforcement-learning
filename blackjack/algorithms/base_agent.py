@@ -12,15 +12,29 @@ class BaseAgent:
         """
         self.env: BlackjackEnv = env
         self.discount_factor = discount_factor
-        self.policy = (
-            {}
-        )  # Changed from np.zeros to dict for sparse state representation
+        self.policy = {}
 
     def train(self, max_iterations=1000, threshold=0.1):
         """
         Train the RL agent using a chosen algorithm.
         """
         raise NotImplementedError("Train method not implemented")
+
+    def save_policy(self, file_path: str):
+        """
+        Save the policy to a file.
+        :param file_path: Path to the file where the policy will be saved
+        """
+        np.save(file_path, self.policy)
+        print(f"Policy saved to {file_path}")
+
+    def act(self, state: tuple[int, int, int]) -> int:
+        """
+        Select an action based on the current policy.
+        :param state: The current state
+        :return: The action to take
+        """
+        return self.policy.get(state, self.env.action_space[np.random.randint(2)])
 
     def plot_value_function(self, show=True, save_path=None):
         """
