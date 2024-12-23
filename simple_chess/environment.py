@@ -8,7 +8,7 @@ from collections import deque
 
 
 class ChessEnvironment:
-    def __init__(self, max_game_length=100):
+    def __init__(self, max_game_length=100, result_weight: float = 0.5):
         self.board = chess.Board()
         self.move_count = 0
         self.piece_values = {
@@ -21,6 +21,12 @@ class ChessEnvironment:
         }
         self.max_game_length = max_game_length
         self.player_scores = {True: 0, False: 0}  # True for white, False for black
+        self.result_weight = result_weight
+        self.checkmate_reward = 200
+        self.loss_reward = -200
+        self.draw_reward = 0
+        self.timestep_reward = -0.1
+        self.illegal_move_reward = -1
 
     def reset(self):
         self.board = chess.Board()
@@ -29,7 +35,7 @@ class ChessEnvironment:
 
     def _get_state(self):
         # Convert board to 8x8x12 binary tensor (6 piece types x 2 colors)
-        state = np.zeros((8, 8, 12), dtype=np.float32)
+        state = np.zeros((12, 8, 8), dtype=np.float32)
         piece_idx = {"P": 0, "N": 1, "B": 2, "R": 3, "Q": 4, "K": 5}
 
         for i in range(64):
@@ -38,7 +44,7 @@ class ChessEnvironment:
                 color = int(piece.color)
                 piece_type = piece_idx[piece.symbol().upper()]
                 rank, file = i // 8, i % 8
-                state[rank, file, piece_type + 6 * color] = 1
+                state[piece_type + 6 * color, rank, file] = 1
 
         return state
 
@@ -51,50 +57,83 @@ class ChessEnvironment:
             mask[from_square * 64 + to_square] = 1
         return mask
 
-    def step(self, action, result_weight: float = 0.5):
-        # Convert action index to chess move
-        from_square = action // 64
-        to_square = action % 64
-        move = chess.Move(from_square, to_square)
-
-        # Check if move is legal
-        if move not in self.board.legal_moves:
-            return self._get_state(), -1, True, {}
-
+    def _calculate_rewards(
+        self,
+        move,
+    ):
         # Track captured pieces
+        is_white_turn = self.board.turn
         captured_piece_value = 0
+
+        # Check if the move captures a piece
         if move in self.board.move_stack:
             captured_piece = self.board.piece_at(move.to_square)
             if captured_piece is not None:
                 captured_piece_value = self.piece_values[
                     captured_piece.symbol().upper()
                 ]
-                self.player_scores[
-                    not self.board.turn
-                ] += captured_piece_value  # Update opponent's score
 
-        # Calculate score difference
-        score_difference = self.player_scores[True] - self.player_scores[False]
-        print(score_difference)
-        # Initialize reward with score difference
-        reward = score_difference
+        if not is_white_turn:
+            captured_piece_value = -captured_piece_value
+
+        score_difference = captured_piece_value
+
         result_reward = 0
-        # Check game state
         done = self.board.is_game_over()
         if done:
             if self.board.is_checkmate():
-                result_reward = 1 if self.board.turn else -1  # Win or loss
+                result_reward = (
+                    self.checkmate_reward if is_white_turn else self.loss_reward
+                )
+                if is_white_turn:
+                    print("White wins")
+                else:
+                    print("Black wins")
             elif self.board.is_stalemate() or self.board.is_insufficient_material():
-                result_reward = 0  # Draw
+                print("Draw")
+                result_reward = self.draw_reward
+            else:
+                print("Game over by other reason")
+        else:
+            result_reward = self.timestep_reward
 
-        # Combine rewards
-        total_reward = (1 - result_weight) * reward + result_weight * result_reward
+        total_reward = (
+            1 - self.result_weight
+        ) * score_difference + self.result_weight * result_reward
+        return total_reward, done
+
+    def _random_action(self, as_index: bool = False):
+        move = random.choice(list(self.board.legal_moves))
+        if as_index:
+            return move.from_square * 64 + move.to_square
+        return move
+
+    def step(self, action):
+        assert self.board.turn
+        # Convert action index to chess move
+        from_square = action // 64
+        to_square = action % 64
+        move = chess.Move(from_square, to_square)
+        done = False
+        # Check if move is legal
+        if move not in self.board.legal_moves:
+            self.move_count += 1
+            done = True if self.move_count > self.max_game_length else False
+            return self._get_state(), self.illegal_move_reward, done, {}
 
         # Make move
         self.board.push(move)
         self.move_count += 1
 
-        if self.move_count > 100:
-            done = True
+        reward, done = self._calculate_rewards(move)
+        if done or self.move_count > self.max_game_length:
+            return self._get_state(), reward, True, {}
 
-        return self._get_state(), total_reward, done, {}
+        assert not self.board.turn
+        ai_action = self._random_action()  # Implement this method to get AI's move
+        self.board.push(ai_action)  # Make the AI's move
+        reward, done = self._calculate_rewards(ai_action)
+        if done:
+            return self._get_state(), reward, True, {}
+
+        return self._get_state(), reward, done, {}
