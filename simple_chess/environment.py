@@ -8,7 +8,7 @@ from collections import deque
 
 
 class ChessEnvironment:
-    def __init__(self, max_game_length=100, result_weight: float = 0.5):
+    def __init__(self, max_game_length=100, score_weight: float = 0.5):
         self.board = chess.Board()
         self.move_count = 0
         self.piece_values = {
@@ -21,11 +21,11 @@ class ChessEnvironment:
         }
         self.max_game_length = max_game_length
         self.player_scores = {True: 0, False: 0}  # True for white, False for black
-        self.result_weight = result_weight
+        self.score_weight = score_weight
         self.checkmate_reward = 200
         self.loss_reward = -200
         self.draw_reward = 0
-        self.timestep_reward = -0.1
+        self.timestep_reward = 0
         self.illegal_move_reward = -1
 
     def reset(self):
@@ -60,11 +60,10 @@ class ChessEnvironment:
     def _calculate_rewards(
         self,
         move,
+        is_white_turn: bool,
     ):
         # Track captured pieces
-        is_white_turn = self.board.turn
         captured_piece_value = 0
-
         # Check if the move captures a piece
         if move in self.board.move_stack:
             captured_piece = self.board.piece_at(move.to_square)
@@ -72,11 +71,8 @@ class ChessEnvironment:
                 captured_piece_value = self.piece_values[
                     captured_piece.symbol().upper()
                 ]
-
         if not is_white_turn:
             captured_piece_value = -captured_piece_value
-
-        score_difference = captured_piece_value
 
         result_reward = 0
         done = self.board.is_game_over()
@@ -89,17 +85,14 @@ class ChessEnvironment:
                     print("White wins")
                 else:
                     print("Black wins")
+
             elif self.board.is_stalemate() or self.board.is_insufficient_material():
                 print("Draw")
                 result_reward = self.draw_reward
             else:
                 print("Game over by other reason")
-        else:
-            result_reward = self.timestep_reward
 
-        total_reward = (
-            1 - self.result_weight
-        ) * score_difference + self.result_weight * result_reward
+        total_reward = self.score_weight * captured_piece_value + result_reward
         return total_reward, done
 
     def _random_action(self, as_index: bool = False):
@@ -125,15 +118,21 @@ class ChessEnvironment:
         self.board.push(move)
         self.move_count += 1
 
-        reward, done = self._calculate_rewards(move)
+        player_reward, done = self._calculate_rewards(move, is_white_turn=True)
         if done or self.move_count > self.max_game_length:
-            return self._get_state(), reward, True, {}
+            return self._get_state(), player_reward, True, {}
 
         assert not self.board.turn
-        ai_action = self._random_action()  # Implement this method to get AI's move
-        self.board.push(ai_action)  # Make the AI's move
-        reward, done = self._calculate_rewards(ai_action)
+        ai_action = self._random_action()
+        self.board.push(ai_action)
+
+        ai_reward, done = self._calculate_rewards(ai_action, is_white_turn=False)
+        reward = player_reward + ai_reward
         if done:
             return self._get_state(), reward, True, {}
 
+        reward += self.timestep_reward
         return self._get_state(), reward, done, {}
+
+    def render(self):
+        print(self.board)

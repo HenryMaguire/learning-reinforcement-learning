@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.optim import AdamW
 from tqdm import tqdm
 from simple_chess.environment import ChessEnvironment
-
+from torch.optim.lr_scheduler import StepLR
 
 # hyperparameters
 LEARNING_RATE = 1e-4
@@ -36,7 +36,6 @@ class PolicyNetwork(nn.Module):
 
 # Initialize network and optimizer
 policy_network = PolicyNetwork()
-optimizer = optim.Adam(policy_network.parameters(), lr=LEARNING_RATE)
 
 if LOAD_SAVED_MODEL:
     saved_checkpoint = torch.load("chess_model.pt")
@@ -59,18 +58,21 @@ def calculate_discounted_rewards(reward_history):
     return discounted_rewards
 
 
-def reinforce(policy, episodes, alpha=1e-4, gamma=0.99, beta=0.01):
+def reinforce(policy, episodes, alpha=5e-4, gamma=0.99, beta=0.01):
     optim = AdamW(policy.parameters(), lr=alpha)
+    scheduler = StepLR(optim, step_size=10, gamma=0.8)
+
     stats = {"PG Loss": [], "Returns": []}
-    result_weight = 0
+    score_weight = 0.5
     game_length = 10
     for episode in tqdm(range(1, episodes + 1)):
         if episode % 10 == 0:
-            result_weight += 0.1
+            score_weight *= 0.9
             game_length += 10
+
         chess_env = ChessEnvironment(
             max_game_length=min(game_length, 50),
-            result_weight=min(result_weight, 1),
+            score_weight=score_weight,
         )
         state = chess_env.reset()  # Reset the environment
         done = False
@@ -121,9 +123,11 @@ def reinforce(policy, episodes, alpha=1e-4, gamma=0.99, beta=0.01):
             optim.zero_grad()
             total_loss_t.backward()
             optim.step()
+            scheduler.step()
         print(
             f"Episode {episode}: PG Loss: {cumulative_loss.item():.2f}, Return: {sum(rewards):.2f} Game Length: {len(transitions)}"
         )
+        chess_env.render()
         # Track statistics
         stats["PG Loss"].append(cumulative_loss.item())
         stats["Returns"].append(sum(rewards))
