@@ -4,11 +4,14 @@ import torch.nn as nn
 import torch.optim as optim
 import chess
 import random
+import gymnasium as gym
+from gymnasium import spaces
 from collections import deque
 
 
-class ChessEnvironment:
+class ChessEnv(gym.Env):
     def __init__(self, max_game_length=100, score_weight: float = 0.5):
+        super(ChessEnv, self).__init__()
         self.board = chess.Board()
         self.move_count = 0
         self.piece_values = {
@@ -20,13 +23,18 @@ class ChessEnvironment:
             "K": 0,  # King is not captured
         }
         self.max_game_length = max_game_length
-        self.player_scores = {True: 0, False: 0}  # True for white, False for black
         self.score_weight = score_weight
         self.checkmate_reward = 200
         self.loss_reward = -200
         self.draw_reward = 0
         self.timestep_reward = 0
         self.illegal_move_reward = -1
+
+        # Define action and observation space
+        self.action_space = spaces.Discrete(4096)  # 64*64 possible moves
+        self.observation_space = spaces.Box(
+            low=0, high=1, shape=(12, 8, 8), dtype=np.float32
+        )
 
     def reset(self):
         self.board = chess.Board()
@@ -41,7 +49,7 @@ class ChessEnvironment:
         for i in range(64):
             piece = self.board.piece_at(i)
             if piece is not None:
-                color = int(piece.color)
+                color = int(piece.color)  # 0 for black, 1 for white
                 piece_type = piece_idx[piece.symbol().upper()]
                 rank, file = i // 8, i % 8
                 state[piece_type + 6 * color, rank, file] = 1
@@ -49,7 +57,6 @@ class ChessEnvironment:
         return state
 
     def _get_legal_moves_mask(self):
-        # Create a mask of legal moves (1 for legal, 0 for illegal)
         mask = np.zeros(4096, dtype=np.float32)  # 64*64 possible moves
         for move in self.board.legal_moves:
             from_square = move.from_square
@@ -57,12 +64,7 @@ class ChessEnvironment:
             mask[from_square * 64 + to_square] = 1
         return mask
 
-    def _calculate_rewards(
-        self,
-        move,
-        is_white_turn: bool,
-    ):
-        # Track captured pieces
+    def _calculate_rewards(self, move, is_white_turn: bool):
         captured_piece_value = 0
         # Check if the move captures a piece
         if move in self.board.move_stack:
@@ -114,7 +116,6 @@ class ChessEnvironment:
             done = True if self.move_count > self.max_game_length else False
             return self._get_state(), self.illegal_move_reward, done, {}
 
-        # Make move
         self.board.push(move)
         self.move_count += 1
 
