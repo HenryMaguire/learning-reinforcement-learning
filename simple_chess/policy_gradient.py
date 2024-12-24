@@ -71,11 +71,12 @@ def _tensor(data, device):
 def reinforce(
     policy,
     episodes,
-    alpha=1e-3,
+    alpha=3e-4,
     gamma=0.99,
-    beta=0.01,
+    beta_entropy=0.03,
+    beta_invalid=1.0,
     num_envs=10,
-    batch_size=64,
+    batch_size=32,
     max_gradient_norm=10.0,
 ):
     device = (
@@ -85,7 +86,7 @@ def reinforce(
     )
     policy = policy.to(device)
     optim = AdamW(policy.parameters(), lr=alpha)
-    scheduler = StepLR(optim, step_size=10, gamma=0.7)
+    scheduler = StepLR(optim, step_size=60, gamma=0.1)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": []}
     score_weight = 1
@@ -127,7 +128,9 @@ def reinforce(
 
             next_states, rewards, new_dones, _, _ = envs.step(actions)
             for i in range(num_envs):
-                batch_transitions[i].append((states[i], actions[i], rewards[i]))
+                batch_transitions[i].append(
+                    (states[i], actions[i], rewards[i], illegal_mask[i])
+                )
                 if new_dones[i]:
                     dones[i] = True
 
@@ -136,7 +139,7 @@ def reinforce(
         all_states = []
         all_actions = []
         all_returns = []
-
+        all_legal_masks = []
         total_reward = 0
         for env_idx, transitions in enumerate(batch_transitions):
             _rewards = [t[2] for t in transitions]
@@ -145,7 +148,7 @@ def reinforce(
             total_reward += sum(_rewards)
 
             G = 0
-            for t, (state_t, action_t, reward_t) in reversed(
+            for t, (state_t, action_t, reward_t, legal_mask_t) in reversed(
                 list(enumerate(transitions))
             ):
                 reward_t = (reward_t - mean_reward) / (std_reward + 1e-6)
@@ -153,22 +156,39 @@ def reinforce(
                 all_states.append(state_t)
                 all_actions.append(action_t)
                 all_returns.append(G)
+                all_legal_masks.append(legal_mask_t)
 
         # Prepare tensors for training
         states = _tensor(all_states, device)
         actions = _tensor(all_actions, device)
         returns = _tensor(all_returns, device)
+        legal_masks = _tensor(torch.stack(all_legal_masks, dim=0), device)
+
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
             actions_batch = actions[i : i + batch_size]
             returns_batch = returns[i : i + batch_size]
+            legal_masks_batch = legal_masks[i : i + batch_size]
             probs = policy(states_batch)
             log_probs = torch.log(probs + 1e-6)
             entropy = -torch.sum(probs * log_probs, dim=-1, keepdim=True)
             action_log_prob = log_probs.gather(1, actions_batch.unsqueeze(1).long())
             pg_loss = -(returns_batch * action_log_prob).mean()
             entropy_loss = entropy.mean()
-            total_loss = pg_loss - beta * entropy_loss
+
+            invalid_probs = probs * (1 - legal_masks_batch)
+            invalid_move_penalty = invalid_probs.sum(dim=1).mean()
+            total_loss = (
+                pg_loss
+                - beta_entropy * entropy_loss
+                + beta_invalid * invalid_move_penalty
+            )
+            print(
+                pg_loss.item(),
+                invalid_move_penalty.item(),
+                -entropy_loss.item(),
+                total_loss.item(),
+            )
 
             optim.zero_grad()
             total_loss.backward()
