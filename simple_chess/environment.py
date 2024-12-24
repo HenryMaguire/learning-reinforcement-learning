@@ -30,9 +30,9 @@ class ChessEnv(gym.Env):
         self.max_game_length = max_game_length
         self.white_score_weight = white_score_weight
         self.black_score_weight = black_score_weight
-        self.checkmate_reward = 0  # 100
-        self.loss_reward = 0  # -100
-        self.check_reward = 0
+        self.checkmate_reward = 50
+        self.loss_reward = -50
+        self.check_reward = 0.0
         self.draw_reward = 0
         self.timestep_reward = 0
         self.illegal_move_reward = 0
@@ -42,6 +42,13 @@ class ChessEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=0, high=1, shape=(12, 8, 8), dtype=np.float32
         )
+
+    def estimate_max_reward(self, num_checks=5):
+        score = 0
+        for piece in [("P", 8), ("N", 2), ("B", 2), ("R", 2), ("Q", 1)]:
+            score += self.piece_values[piece[0]] * piece[1]
+        # Taking all pieces yields 39 points.
+        return self.checkmate_reward + self.check_reward * num_checks + score
 
     def reset(self, seed=None, return_info=False, options=None):
         if seed is not None:
@@ -94,9 +101,9 @@ class ChessEnv(gym.Env):
             return 0
 
     def _calculate_rewards(self, is_white_turn: bool, capture_points: int):
-
+        capture_rewards = capture_points / 10
         if not is_white_turn:
-            capture_points = -capture_points
+            capture_rewards = -capture_rewards
 
         result_reward = 0
         done = self.board.is_game_over()
@@ -121,13 +128,13 @@ class ChessEnv(gym.Env):
         )
         if is_white_turn:
             total_reward = (
-                self.white_score_weight * capture_points
+                self.white_score_weight * capture_rewards
                 + positional_reward
                 + result_reward
             )
         else:
             total_reward = (
-                self.black_score_weight * capture_points
+                self.black_score_weight * capture_rewards
                 + positional_reward
                 + result_reward
             )
