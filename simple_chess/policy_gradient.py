@@ -66,8 +66,6 @@ def reinforce(
     episodes,
     alpha=3e-4,
     gamma=0.99,
-    beta_entropy=0.03,
-    beta_invalid_move=0.5,
     num_envs=10,
     batch_size=32,
     max_gradient_norm=2.0,
@@ -80,7 +78,7 @@ def reinforce(
     loss_weights = LossWeights().to(device)
     policy = policy.to(device)
     optim = AdamW(list(policy.parameters()) + list(loss_weights.parameters()), lr=alpha)
-    scheduler = StepLR(optim, step_size=130, gamma=0.5)
+    scheduler = StepLR(optim, step_size=100, gamma=0.5)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": []}
     score_weight = 1.0
