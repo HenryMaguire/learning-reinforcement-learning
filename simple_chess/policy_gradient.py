@@ -59,8 +59,8 @@ def reinforce(
     episodes,
     alpha=3e-4,
     gamma=0.99,
-    beta_entropy=0.01,
-    beta_invalid=1.0,
+    beta_entropy=0.12,  # 1 / np.log(4096)
+    beta=1.0,
     num_envs=10,
     batch_size=32,
     max_gradient_norm=10.0,
@@ -82,6 +82,7 @@ def reinforce(
     for episode_batch in tqdm(range(1, episodes + 1)):
         if episode_batch % 10 == 0:
             score_weight *= 0.9
+            beta_entropy *= 0.95
             game_length = min(game_length + 5, max_game_length)
 
         env_fns = [make_env(game_length, 0, 0) for _ in range(num_envs)]
@@ -147,7 +148,7 @@ def reinforce(
         actions = _tensor(all_actions, device)
         returns = _tensor(all_returns, device)
         legal_masks = _tensor(torch.stack(all_legal_masks, dim=0), device)
-        print("Rewards | Loss | PG Loss | Invalid Move | Entropy Loss")
+        print("Rewards | Loss | PG Loss | Invalid Move | Entropy | Ratio")
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
             actions_batch = actions[i : i + batch_size]
@@ -162,13 +163,12 @@ def reinforce(
 
             invalid_probs = probs * (1 - legal_masks_batch)
             invalid_move_penalty = invalid_probs.sum(dim=1).mean()
-            total_loss = (
-                pg_loss
-                - beta_entropy * entropy_loss
-                + beta_invalid * invalid_move_penalty
+            total_loss = pg_loss + beta * (
+                invalid_move_penalty - beta_entropy * entropy_loss
             )
+            reg_ratio = beta_entropy * entropy_loss / invalid_move_penalty
             print(
-                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_penalty.item():.5f} | {-entropy_loss.item():.5f}"
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_penalty.item():.5f} | {-entropy_loss.item():.5f} | {reg_ratio:.5f}"
             )
 
             optim.zero_grad()

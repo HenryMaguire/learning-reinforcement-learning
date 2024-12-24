@@ -35,7 +35,7 @@ class ChessEnv(gym.Env):
         self.check_reward = 0
         self.draw_reward = 0
         self.timestep_reward = 0
-        self.illegal_move_reward = -1
+        self.illegal_move_reward = 0
 
         # Define action and observation space
         self.action_space = spaces.Discrete(4096)  # 64*64 possible moves
