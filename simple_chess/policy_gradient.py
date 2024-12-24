@@ -54,6 +54,13 @@ def _tensor(data, device):
     return torch.tensor(data, dtype=torch.float32).to(device)
 
 
+class LossWeights(nn.Module):
+    def __init__(self, init_entropy_weight=0.5, init_invalid_weight=0.5):
+        super().__init__()
+        self.entropy_weight = nn.Parameter(torch.tensor(init_entropy_weight))
+        self.invalid_weight = nn.Parameter(torch.tensor(init_invalid_weight))
+
+
 def reinforce(
     policy,
     episodes,
@@ -70,8 +77,9 @@ def reinforce(
         if torch.backends.mps.is_available()
         else torch.device("cpu")
     )
+    loss_weights = LossWeights().to(device)
     policy = policy.to(device)
-    optim = AdamW(policy.parameters(), lr=alpha)
+    optim = AdamW(list(policy.parameters()) + list(loss_weights.parameters()), lr=alpha)
     scheduler = StepLR(optim, step_size=130, gamma=0.5)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": []}
@@ -168,10 +176,10 @@ def reinforce(
             invalid_move_loss = torch.log(invalid_probs.sum(dim=1)).mean()
             total_loss = (
                 pg_loss
-                + beta_invalid_move * invalid_move_loss
-                + beta_entropy * entropy_loss
+                + loss_weights.invalid_weight * invalid_move_loss
+                + loss_weights.entropy_weight * entropy_loss
             )
-            reg_ratio = beta_entropy * entropy_loss / invalid_move_loss
+            reg_ratio = loss_weights.entropy_weight * entropy_loss / invalid_move_loss
 
             optim.zero_grad()
             total_loss.backward()
@@ -179,7 +187,7 @@ def reinforce(
                 policy.parameters(), max_norm=max_gradient_norm
             )
             print(
-                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {reg_ratio:.5f} | {total_norm:.3f}"
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {reg_ratio:.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}"
             )
             stats["PG Loss"].append(total_loss.item())
             stats["Returns"].append(returns_batch.mean().item())
