@@ -1,10 +1,10 @@
 from typing import Callable
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
+
 from torch.optim import AdamW
 from tqdm import tqdm
+from simple_chess.base_policy_model import PolicyNetwork
 from simple_chess.environment import ChessEnv
 from torch.optim.lr_scheduler import StepLR
 import gymnasium as gym
@@ -16,31 +16,17 @@ DISCOUNT_FACTOR = 0.99
 LOAD_SAVED_MODEL = False
 
 
-class PolicyNetwork(nn.Module):
-    def __init__(self):
-        super().__init__()
-        # Example CNN structure - you'll want to replace this
-        self.conv1 = nn.Conv2d(12, 64, 3, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, 3, padding=1)
-        self.conv3 = nn.Conv2d(128, 256, 3)
-
-        # 4096 = 64*64 possible moves
-        self.move_predictor = nn.Linear(256 * 6 * 6, 4096)
-
-    def forward(self, board_position):
-        features = torch.relu(self.conv1(board_position))
-        features = torch.relu(self.conv2(features))
-        features = torch.relu(self.conv3(features))
-        features_flat = features.view(-1, 256 * 6 * 6)
-        move_probabilities = torch.softmax(self.move_predictor(features_flat), dim=1)
-        return move_probabilities
-
-
-def make_env(max_game_length: int, score_weight: float) -> Callable:
+def make_env(
+    max_game_length: int, white_score_weight: float, black_score_weight: float
+) -> Callable:
     """Create a callable that creates an environment with the given parameters."""
 
     def _init() -> gym.Env:
-        env = ChessEnv(max_game_length=max_game_length, score_weight=score_weight)
+        env = ChessEnv(
+            max_game_length=max_game_length,
+            white_score_weight=white_score_weight,
+            black_score_weight=black_score_weight,
+        )
         return env
 
     return _init
@@ -73,7 +59,7 @@ def reinforce(
     episodes,
     alpha=3e-4,
     gamma=0.99,
-    beta_entropy=0.03,
+    beta_entropy=0.01,
     beta_invalid=1.0,
     num_envs=10,
     batch_size=32,
@@ -86,22 +72,20 @@ def reinforce(
     )
     policy = policy.to(device)
     optim = AdamW(policy.parameters(), lr=alpha)
-    scheduler = StepLR(optim, step_size=60, gamma=0.1)
+    scheduler = StepLR(optim, step_size=100, gamma=0.5)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": []}
-    score_weight = 1
+    score_weight = 0.5
     game_length = 20
+    max_game_length = 70
     max_reward = 0
     for episode_batch in tqdm(range(1, episodes + 1)):
         if episode_batch % 10 == 0:
-            # score_weight *= 0.9
-            game_length = min(game_length + 5, 50)
+            score_weight *= 0.9
+            game_length = min(game_length + 5, max_game_length)
 
-        env_fns = [
-            make_env(min(game_length, 50), score_weight) for _ in range(num_envs)
-        ]
+        env_fns = [make_env(game_length, 0, 0) for _ in range(num_envs)]
         envs = AsyncVectorEnv(env_fns)
-
         states, _ = envs.reset()  # Reset the environment
         dones = [False] * num_envs
         batch_transitions = [[] for _ in range(num_envs)]
@@ -163,7 +147,7 @@ def reinforce(
         actions = _tensor(all_actions, device)
         returns = _tensor(all_returns, device)
         legal_masks = _tensor(torch.stack(all_legal_masks, dim=0), device)
-
+        print("Rewards | Loss | PG Loss | Invalid Move | Entropy Loss")
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
             actions_batch = actions[i : i + batch_size]
@@ -184,10 +168,7 @@ def reinforce(
                 + beta_invalid * invalid_move_penalty
             )
             print(
-                pg_loss.item(),
-                invalid_move_penalty.item(),
-                -entropy_loss.item(),
-                total_loss.item(),
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_penalty.item():.5f} | {-entropy_loss.item():.5f}"
             )
 
             optim.zero_grad()

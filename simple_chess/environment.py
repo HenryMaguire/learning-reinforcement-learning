@@ -10,7 +10,12 @@ from collections import deque
 
 
 class ChessEnv(gym.Env):
-    def __init__(self, max_game_length=100, score_weight: float = 0.5):
+    def __init__(
+        self,
+        max_game_length=100,
+        white_score_weight: float = 0.5,
+        black_score_weight: float = 0.5,
+    ):
         super(ChessEnv, self).__init__()
         self.board = chess.Board()
         self.move_count = 0
@@ -23,12 +28,14 @@ class ChessEnv(gym.Env):
             "K": 0,  # King is not captured
         }
         self.max_game_length = max_game_length
-        self.score_weight = score_weight
-        self.checkmate_reward = 500
-        self.loss_reward = -500
+        self.white_score_weight = white_score_weight
+        self.black_score_weight = black_score_weight
+        self.checkmate_reward = 0  # 100
+        self.loss_reward = 0  # -100
+        self.check_reward = 0
         self.draw_reward = 0
         self.timestep_reward = 0
-        self.illegal_move_reward = 0
+        self.illegal_move_reward = -1
 
         # Define action and observation space
         self.action_space = spaces.Discrete(4096)  # 64*64 possible moves
@@ -68,34 +75,28 @@ class ChessEnv(gym.Env):
             mask[from_square * 64 + to_square] = 1
         return mask
 
-    def _calculate_positional_reward(self):
-        king_square = self.board.king(True)
+    def _calculate_positional_reward(self, is_white_turn: bool):
+        # You can't move into check, so only check opposite king.
+        king_square = self.board.king(not is_white_turn)
         if king_square is not None:
-            attackers = len(self.board.attackers(False, king_square))
-            king_safety_reward = -3 * attackers
-        else:
-            king_safety_reward = 0
+            attackers = len(self.board.attackers(is_white_turn, king_square))
+            # Being in check two ways is polynomially worse than one
+            reward = self.check_reward * attackers**2
+            # if is_white_turn, black is in check
+            return reward if is_white_turn else -reward
+        return 0
 
-        # For black
-        king_square = self.board.king(False)
-        if king_square is not None:
-            attackers = len(self.board.attackers(True, king_square))
-            king_safety_reward += 3 * attackers
+    def _calculate_capture_points(self, move):
+        captured_piece = self.board.piece_at(move.to_square)
+        if captured_piece is not None:
+            return self.piece_values[captured_piece.symbol().upper()]
         else:
-            king_safety_reward += 0
-        return king_safety_reward
+            return 0
 
-    def _calculate_rewards(self, move, is_white_turn: bool):
-        captured_piece_value = 0
-        # Check if the move captures a piece
-        if move in self.board.move_stack:
-            captured_piece = self.board.piece_at(move.to_square)
-            if captured_piece is not None:
-                captured_piece_value = self.piece_values[
-                    captured_piece.symbol().upper()
-                ]
+    def _calculate_rewards(self, is_white_turn: bool, capture_points: int):
+
         if not is_white_turn:
-            captured_piece_value = -captured_piece_value
+            capture_points = -capture_points
 
         result_reward = 0
         done = self.board.is_game_over()
@@ -115,10 +116,21 @@ class ChessEnv(gym.Env):
             else:
                 print("Game over by other reason")
 
-        positional_reward = self._calculate_positional_reward()
-        total_reward = (
-            self.score_weight * captured_piece_value + positional_reward + result_reward
+        positional_reward = self._calculate_positional_reward(
+            is_white_turn=is_white_turn
         )
+        if is_white_turn:
+            total_reward = (
+                self.white_score_weight * capture_points
+                + positional_reward
+                + result_reward
+            )
+        else:
+            total_reward = (
+                self.black_score_weight * capture_points
+                + positional_reward
+                + result_reward
+            )
         return total_reward, done
 
     def _random_action(self, as_index: bool = False):
@@ -134,25 +146,30 @@ class ChessEnv(gym.Env):
         to_square = action % 64
         move = chess.Move(from_square, to_square)
         done = False
-        truncated = False
+        truncated = False  # TODO(hm): use truncation.
         # Check if move is legal
         if move not in self.board.legal_moves:
             self.move_count += 1
             done = True if self.move_count > self.max_game_length else False
             return self._get_state(), self.illegal_move_reward, done, truncated, {}
 
+        capture_points = self._calculate_capture_points(move)
         self.board.push(move)
         self.move_count += 1
 
-        player_reward, done = self._calculate_rewards(move, is_white_turn=True)
+        player_reward, done = self._calculate_rewards(
+            is_white_turn=True, capture_points=capture_points
+        )
         if done or self.move_count > self.max_game_length:
             return self._get_state(), player_reward, True, truncated, {}
 
         assert not self.board.turn
         ai_action = self._random_action()
+        capture_points = self._calculate_capture_points(ai_action)
         self.board.push(ai_action)
-
-        ai_reward, done = self._calculate_rewards(ai_action, is_white_turn=False)
+        ai_reward, done = self._calculate_rewards(
+            is_white_turn=False, capture_points=capture_points
+        )
         reward = player_reward + ai_reward
         if done:
             return self._get_state(), reward, done, truncated, {}
