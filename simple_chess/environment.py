@@ -32,9 +32,9 @@ class ChessEnv(gym.Env):
         self.black_score_weight = black_score_weight
         self.checkmate_reward = 50
         self.loss_reward = -50
-        self.check_reward = 0.0
+        self.check_reward = 5
         self.draw_reward = 0
-        self.timestep_reward = 0
+        self.timestep_reward = -0.1
         self.illegal_move_reward = 0
 
         # Define action and observation space

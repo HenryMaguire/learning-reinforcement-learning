@@ -55,10 +55,22 @@ def _tensor(data, device):
 
 
 class LossWeights(nn.Module):
-    def __init__(self, init_entropy_weight=0.5, init_invalid_weight=0.5):
+    def __init__(
+        self,
+        init_entropy_weight=0.01,
+        init_invalid_weight=0.5,
+        init_gradient_weight=0.01,
+    ):
         super().__init__()
         self.entropy_weight = nn.Parameter(torch.tensor(init_entropy_weight))
         self.invalid_weight = nn.Parameter(torch.tensor(init_invalid_weight))
+        self._raw_gradient_weight = nn.Parameter(
+            torch.tensor(np.log(init_gradient_weight), dtype=torch.float32)
+        )
+
+    @property
+    def gradient_weight(self):
+        return torch.exp(self._raw_gradient_weight)
 
 
 def reinforce(
@@ -80,7 +92,7 @@ def reinforce(
     optim = AdamW(list(policy.parameters()) + list(loss_weights.parameters()), lr=alpha)
     scheduler = StepLR(optim, step_size=100, gamma=0.5)
 
-    stats = {"PG Loss": [], "Returns": [], "Game Lengths": []}
+    stats = {"PG Loss": [], "Returns": [], "Game Lengths": [], "WinLoss": []}
     score_weight = 1.0
     game_length = 30
     max_game_length = 70
@@ -132,11 +144,13 @@ def reinforce(
         all_returns = []
         all_legal_masks = []
         total_reward = 0
+        win_loss = 0
         for env_idx, transitions in enumerate(batch_transitions):
             _rewards = [t[2] for t in transitions]
             mean_reward = np.mean(_rewards)
             std_reward = np.std(_rewards)
             total_reward += sum(_rewards)
+            win_loss += sum(_rewards) > 0 - sum(_rewards) <= 0
 
             G = 0
             # Moving from the last timestep, calculate the discounted return.
@@ -155,7 +169,9 @@ def reinforce(
         actions = _tensor(all_actions, device)
         returns = _tensor(all_returns, device)
         legal_masks = _tensor(torch.stack(all_legal_masks, dim=0), device)
-        print("Rewards | Loss | PG Loss | Invalid Move | Entropy | Ratio")
+        print(
+            "Rewards | Loss | PG Loss | Invalid | Entropy | Ratio | gNorm | bEntropy | bInvalid | bGradient"
+        )
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
             # Actions taken by the current policy.
@@ -180,13 +196,26 @@ def reinforce(
             reg_ratio = loss_weights.entropy_weight * entropy_loss / invalid_move_loss
 
             optim.zero_grad()
-            total_loss.backward()
+            total_loss.backward(retain_graph=True)
+            grad_norm = 0.0
+            for param in policy.parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.norm(2).item() ** 2
+
+            grad_norm = grad_norm**0.5
+            # total_loss += loss_weights.gradient_weight * grad_norm
+
+            optim.zero_grad()
+            total_loss.backward(retain_graph=True)
             total_norm = torch.nn.utils.clip_grad_norm_(
                 policy.parameters(), max_norm=max_gradient_norm
             )
+            positive_games = (returns_batch > 0).sum().item()
+            negative_games = (returns_batch < 0).sum().item()
             print(
-                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {reg_ratio:.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}"
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {reg_ratio:.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}| {loss_weights.gradient_weight.item():.3f}"
             )
+            # print(positive_games, negative_games)
             stats["PG Loss"].append(total_loss.item())
             stats["Returns"].append(returns_batch.mean().item())
             optim.step()
@@ -194,7 +223,7 @@ def reinforce(
         max_reward = max(max_reward, total_reward / num_envs)
 
         print(
-            f"Average Reward: {total_reward / num_envs:.2f} Max Reward: {max_reward:.2f} Learning Rate: {optim.param_groups[0]['lr']:.4f}"
+            f"Average Reward: {total_reward / num_envs:.2f} Max Reward: {max_reward:.2f} Learning Rate: {optim.param_groups[0]['lr']:.4f} WinLoss: {win_loss}"
         )
     envs.close()
     return stats
