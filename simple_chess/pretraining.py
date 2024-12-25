@@ -123,19 +123,18 @@ class RandomChessDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        norm = np.sum(self.legal_actions[idx])
-        assert norm > 0, "No legal actions found"
+        assert np.sum(self.legal_actions[idx]) > 0, "No legal actions found"
         return (
             torch.tensor(self.boards[idx], dtype=torch.float32),
-            torch.tensor(self.legal_actions[idx] / norm, dtype=torch.float32),
+            torch.tensor(self.legal_actions[idx], dtype=torch.float32),
         )
 
 
 def pretrain_policy_model():
     # Hyperparameters
     batch_size = 32
-    learning_rate = 5e-4
-    num_epochs = 30
+    learning_rate = 5e-3
+    num_epochs = 8
     device = (
         torch.device("mps")
         if torch.backends.mps.is_available()
@@ -160,7 +159,7 @@ def pretrain_policy_model():
     model = PolicyNetwork(with_softmax=False).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.7)
     # Training loop
     for epoch in range(num_epochs):
         total_loss = 0
@@ -185,8 +184,6 @@ def pretrain_policy_model():
         test_loss = 0
         invalid_probs = []
         for states, target in test_loader:
-            if test_loss < 0.01:
-                board = board_from_state(states[0].cpu().numpy())
             states = states.to(device)
             target = target.to(device)  # Valid mask.
             outputs = model(states)

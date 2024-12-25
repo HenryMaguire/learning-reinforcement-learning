@@ -14,6 +14,7 @@ class PolicyNetwork(nn.Module):
         self.linear1 = nn.Linear(256 * 6 * 6, 4096)
         # 4096 = 64*64 possible moves
         self.move_predictor = nn.Linear(4096, 4096)
+        self.dropout = nn.Dropout(0.3)
         self.with_softmax = with_softmax
 
     def forward(self, board_position):
@@ -21,7 +22,9 @@ class PolicyNetwork(nn.Module):
         features = torch.relu(self.conv2(features))
         features = torch.relu(self.conv3(features))
         features_flat = features.view(-1, 256 * 6 * 6)
+        features_flat = self.dropout(features_flat)
         features_flat = torch.relu(self.linear1(features_flat))
+        features_flat = self.dropout(features_flat)
         if self.with_softmax:
             move_probabilities = torch.softmax(
                 self.move_predictor(features_flat), dim=1
