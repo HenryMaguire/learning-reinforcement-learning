@@ -1,3 +1,4 @@
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 import multiprocessing
 import os
 import pickle
+from torch.utils.data import random_split
 
 
 def generate_random_board(max_moves=20):
@@ -41,6 +43,25 @@ def board_to_state(board):
     return state
 
 
+def board_from_state(state: np.ndarray) -> chess.Board:
+    assert state.shape == (12, 8, 8)
+    board = chess.Board()
+    board.clear()  # Clear the board to set pieces manually
+    piece_idx = {0: "P", 1: "N", 2: "B", 3: "R", 4: "Q", 5: "K"}
+
+    for i in range(64):
+        rank, file = i // 8, i % 8
+        piece_channel = state[:, rank, file].argmax()
+        if piece_channel < 6:
+            piece = chess.Piece.from_symbol(piece_idx[piece_channel])
+            board.set_piece_at(i, piece)
+        else:
+            piece = chess.Piece.from_symbol(piece_idx[piece_channel - 6].lower())
+            board.set_piece_at(i, piece)
+
+    return board
+
+
 def generate_legal_action_mask(board):
     mask = np.zeros(4096, dtype=np.float32)
     for move in board.legal_moves:
@@ -67,7 +88,7 @@ def generate_boards(num_boards, max_moves=20):
 
 
 def save_boards_to_disk(
-    num_boards=10000,
+    num_boards=1000000,
     max_moves=100,
     filename="chess_boards.npy",
     actions_filename="chess_legal_actions.npy",
@@ -92,10 +113,11 @@ class RandomChessDataset(Dataset):
         self,
         boards_path="chess_boards.npy",
         legal_actions_path="chess_legal_actions.npy",
+        max_samples=1000000,
     ):
         self.boards = np.load(boards_path, mmap_mode="r")
         self.legal_actions = np.load(legal_actions_path, mmap_mode="r")
-        self.num_samples = self.boards.shape[0]
+        self.num_samples = min(self.boards.shape[0], max_samples)
 
     def __len__(self):
         return self.num_samples
@@ -112,8 +134,8 @@ class RandomChessDataset(Dataset):
 def pretrain_policy_model():
     # Hyperparameters
     batch_size = 32
-    learning_rate = 5e-3
-    num_epochs = 10
+    learning_rate = 5e-4
+    num_epochs = 30
     device = (
         torch.device("mps")
         if torch.backends.mps.is_available()
@@ -121,34 +143,64 @@ def pretrain_policy_model():
     )
 
     # Initialize dataset and dataloader
-    dataset = RandomChessDataset()
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataset = RandomChessDataset(max_samples=200000)
+
+    train_size = int(0.95 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+    # Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Test dataset size: {len(test_dataset)}")
 
     # Initialize model, loss function, and optimizer
-    model = PolicyNetwork().to(device)
-    criterion = nn.CrossEntropyLoss()
+    model = PolicyNetwork(with_softmax=False).to(device)
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     # Training loop
     for epoch in range(num_epochs):
         total_loss = 0
-        for states, target_probs in dataloader:
+        for states, target in train_loader:
             states = states.to(device)
-            target_probs = target_probs.to(device)
+            target = target.to(device)
 
             outputs = model(states)
-            loss = criterion(outputs, target_probs)
-
+            loss = criterion(outputs, target)
             optimizer.zero_grad()
             loss.backward()
+
+            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+            if norm > 2.0:
+                print(f"Gradient norm: {norm}")
             optimizer.step()
 
             total_loss += loss.item()
 
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(dataloader):.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(train_loader)}")
 
-    # Save the pretrained model
-    torch.save(model.state_dict(), "pretrained_policy.pt")
+        test_loss = 0
+        invalid_probs = []
+        for states, target in test_loader:
+            if test_loss < 0.01:
+                board = board_from_state(states[0].cpu().numpy())
+            states = states.to(device)
+            target = target.to(device)  # Valid mask.
+            outputs = model(states)
+            loss = criterion(outputs, target)
+            test_loss += loss.item()
+            pred_probs = torch.softmax(outputs, dim=1)
+            invalid_prob = (pred_probs * (1 - target)).sum(dim=1).mean()
+            invalid_probs.append(invalid_prob.item())
+
+        print(f"Test Loss: {test_loss/len(test_loader)}")
+        print(f"Invalid Prob: {np.mean(invalid_probs)}")
+        scheduler.step()
+        # Save the pretrained model
+        torch.save(model.state_dict(), "pretrained_policy.pt")
 
 
 if __name__ == "__main__":
