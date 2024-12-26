@@ -226,5 +226,6 @@ def reinforce(
 
 if __name__ == "__main__":
     policy_network = PolicyNetwork()
+    policy_network.load_state_dict(torch.load("pretrained_policy.pt"))
     stats = reinforce(policy_network, 200, num_envs=10)
     # print(stats)
