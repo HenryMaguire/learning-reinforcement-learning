@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Callable
 import numpy as np
 import torch
@@ -51,6 +52,8 @@ def _tensor(data, device):
     if isinstance(data, list):
         if isinstance(data[0], np.ndarray):
             data = np.array(data)
+        if isinstance(data[0], torch.Tensor):
+            data = torch.stack(data)
     return torch.tensor(data, dtype=torch.float32).to(device)
 
 
@@ -76,7 +79,7 @@ class LossWeights(nn.Module):
 def reinforce(
     policy,
     episodes,
-    alpha=3e-4,
+    alpha=5e-4,
     gamma=0.99,
     num_envs=10,
     batch_size=32,
@@ -93,13 +96,13 @@ def reinforce(
     scheduler = StepLR(optim, step_size=100, gamma=0.5)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": [], "WinLoss": []}
-    score_weight = 1.0
-    game_length = 30
-    max_game_length = 70
+    score_weight = 0.5
+    game_length = 50
+    # max_game_length = 70
     max_reward = 0
     for episode_batch in tqdm(range(1, episodes + 1)):
-        if episode_batch % 20 == 0:
-            game_length = min(game_length + 10, max_game_length)
+        # if episode_batch % 20 == 0:
+        #     game_length = min(game_length + 10, max_game_length)
 
         env_fns = [
             make_env(game_length, score_weight, score_weight) for _ in range(num_envs)
@@ -168,9 +171,16 @@ def reinforce(
         states = _tensor(all_states, device)
         actions = _tensor(all_actions, device)
         returns = _tensor(all_returns, device)
-        legal_masks = _tensor(torch.stack(all_legal_masks, dim=0), device)
+        legal_masks = _tensor(all_legal_masks, device)
+
+        # Shuffle the data
+        indices = torch.randperm(len(states))
+        states = states[indices]
+        actions = actions[indices]
+        returns = returns[indices]
+        legal_masks = legal_masks[indices]
         print(
-            "Rewards | Loss | PG Loss | Invalid | Entropy | Ratio | gNorm | bEntropy | bInvalid | bGradient"
+            "Rewards | Loss | PG Loss | Invalid | Entropy | gNorm | bEntropy | bInvalid | bGradient"
         )
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
@@ -191,34 +201,19 @@ def reinforce(
             total_loss = (
                 pg_loss
                 + loss_weights.invalid_weight * invalid_move_loss
-                + loss_weights.entropy_weight * entropy_loss
+                + 0.02 * entropy_loss
             )
-            reg_ratio = loss_weights.entropy_weight * entropy_loss / invalid_move_loss
-
-            optim.zero_grad()
-            total_loss.backward(retain_graph=True)
-            grad_norm = 0.0
-            for param in policy.parameters():
-                if param.grad is not None:
-                    grad_norm += param.grad.norm(2).item() ** 2
-
-            grad_norm = grad_norm**0.5
-            # total_loss += loss_weights.gradient_weight * grad_norm
-
-            optim.zero_grad()
-            total_loss.backward(retain_graph=True)
+            total_loss.backward()
             total_norm = torch.nn.utils.clip_grad_norm_(
                 policy.parameters(), max_norm=max_gradient_norm
             )
-            positive_games = (returns_batch > 0).sum().item()
-            negative_games = (returns_batch < 0).sum().item()
             print(
-                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {reg_ratio:.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}| {loss_weights.gradient_weight.item():.3f}"
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}| {loss_weights.gradient_weight.item():.3f}"
             )
-            # print(positive_games, negative_games)
             stats["PG Loss"].append(total_loss.item())
             stats["Returns"].append(returns_batch.mean().item())
-            optim.step()
+        optim.step()
+        optim.zero_grad()
         scheduler.step()
         max_reward = max(max_reward, total_reward / num_envs)
 

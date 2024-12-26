@@ -4,7 +4,7 @@ import torch
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, with_softmax: bool = False):
+    def __init__(self, with_softmax: bool = True):
         super().__init__()
         # Example CNN structure - you'll want to replace this
         self.conv1 = nn.Conv2d(12, 64, 3, padding=1)
