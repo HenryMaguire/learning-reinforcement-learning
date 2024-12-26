@@ -61,7 +61,7 @@ class LossWeights(nn.Module):
     def __init__(
         self,
         init_entropy_weight=0.01,
-        init_invalid_weight=0.5,
+        init_invalid_weight=0.1,
         init_gradient_weight=0.01,
     ):
         super().__init__()

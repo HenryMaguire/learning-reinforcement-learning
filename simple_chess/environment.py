@@ -101,7 +101,7 @@ class ChessEnv(gym.Env):
             return 0
 
     def _calculate_rewards(self, is_white_turn: bool, capture_points: int):
-        capture_rewards = capture_points / 10
+        capture_rewards = capture_points
         if not is_white_turn:
             capture_rewards = -capture_rewards
 
