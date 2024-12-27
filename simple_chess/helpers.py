@@ -30,6 +30,12 @@ class ChessVectorEnv(AsyncVectorEnv):
     def get_random_action(self, as_index: bool = True):
         return self.call("get_random_action", as_index=as_index)
 
+    def get_legal_moves_mask(self):
+        return np.array(self.call("_get_legal_moves_mask"))
+
+    def get_win_lose_draw(self):
+        return np.array(self.call("get_win_lose_draw"))
+
 
 def to_tensor(data, device):
     if isinstance(data, list):

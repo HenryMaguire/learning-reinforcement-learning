@@ -43,13 +43,6 @@ class ChessEnv(gym.Env):
             low=0, high=1, shape=(12, 8, 8), dtype=np.float32
         )
 
-    def estimate_max_reward(self, num_checks=5):
-        score = 0
-        for piece in [("P", 8), ("N", 2), ("B", 2), ("R", 2), ("Q", 1)]:
-            score += self.piece_values[piece[0]] * piece[1]
-        # Taking all pieces yields 39 points.
-        return self.checkmate_reward + self.check_reward * num_checks + score
-
     def reset(self, seed=None, return_info=False, options=None):
         if seed is not None:
             np.random.seed(seed)
@@ -146,6 +139,14 @@ class ChessEnv(gym.Env):
             return move.from_square * 64 + move.to_square
         return move
 
+    def get_win_lose_draw(self, is_white_turn: bool):
+        if self.board.is_game_over():
+            if self.board.is_checkmate():
+                return 1 if is_white_turn else -1
+            elif self.board.is_stalemate() or self.board.is_insufficient_material():
+                return 0
+        return None
+
     def step(self, action):
         assert self.board.turn
         # Convert action index to chess move
@@ -168,7 +169,13 @@ class ChessEnv(gym.Env):
             is_white_turn=True, capture_points=capture_points
         )
         if done or self.move_count > self.max_game_length:
-            return self._get_state(), player_reward, True, truncated, {}
+            return (
+                self._get_state(),
+                player_reward,
+                True,
+                truncated,
+                {"result": self.get_win_lose_draw(is_white_turn=True)},
+            )
 
         assert not self.board.turn
         ai_action = self.get_random_action()
@@ -179,7 +186,13 @@ class ChessEnv(gym.Env):
         )
         reward = player_reward + ai_reward
         if done:
-            return self._get_state(), reward, done, truncated, {}
+            return (
+                self._get_state(),
+                reward,
+                done,
+                truncated,
+                {"result": self.get_win_lose_draw(is_white_turn=False)},
+            )
 
         reward += self.timestep_reward
         return self._get_state(), reward, done, truncated, {}

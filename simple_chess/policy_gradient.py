@@ -27,12 +27,12 @@ def reinforce(
     episodes,
     alpha=1e-4,
     gamma=0.99,
-    entropy_weight=0.02,
+    entropy_weight=0.03,
     invalid_weight=1.0,
     score_weight=0.5,
     num_envs=10,
     batch_size=128,
-    epsilon=0.05,
+    epsilon=0.5,
     max_gradient_norm=1.0,
 ):
     device = (
@@ -40,13 +40,9 @@ def reinforce(
         if torch.backends.mps.is_available()
         else torch.device("cpu")
     )
-    loss_weights = LossWeights(
-        init_entropy_weight=entropy_weight,
-        init_invalid_weight=invalid_weight,
-    ).to(device)
 
     policy = policy.to(device)
-    optim = AdamW(list(policy.parameters()) + list(loss_weights.parameters()), lr=alpha)
+    optim = AdamW(list(policy.parameters()), lr=alpha)
     scheduler = StepLR(optim, step_size=100, gamma=0.8)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": [], "WinLoss": []}
@@ -139,7 +135,7 @@ def reinforce(
         returns = returns[indices]
         legal_masks = legal_masks[indices]
         print(
-            "Rewards | Loss | PG Loss | Invalid | Entropy | gNorm | bEntropy | bInvalid | bGradient"
+            "Rewards | Loss       | PG Loss | Invalid | Entropy | gNorm | bEntropy | bInvalid | bGradient"
         )
         num_batches = len(states) // batch_size
         for i in range(0, len(states), batch_size):
@@ -160,7 +156,7 @@ def reinforce(
             invalid_move_loss = torch.log(invalid_probs.sum(dim=1)).mean()
             total_loss = (
                 pg_loss
-                # + loss_weights.invalid_weight * invalid_move_loss
+                + invalid_weight * invalid_move_loss
                 + entropy_weight * entropy_loss
             )
             # total_loss /= num_batches
