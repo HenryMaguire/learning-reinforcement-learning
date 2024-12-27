@@ -3,7 +3,7 @@ import torch.optim as optim
 import torch
 
 
-class PolicyNetwork(nn.Module):
+class ChessCNN(nn.Module):
     def __init__(self, with_softmax: bool = True):
         super().__init__()
         # Example CNN structure - you'll want to replace this
@@ -32,3 +32,26 @@ class PolicyNetwork(nn.Module):
         else:
             move_probabilities = self.move_predictor(features_flat)
         return move_probabilities
+
+
+class ChessMLP(nn.Module):
+    def __init__(
+        self,
+        input_size: int = 768,  # e.g. 12*8*8 flattened board
+        hidden_size: int = 512,
+        output_size: int = 4096,
+        dropout_p: float = 0.3,
+        with_softmax: bool = True,
+    ):
+        super().__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.dropout_p = dropout_p
+        self.with_softmax = with_softmax
+
+    def forward(self, board_position: torch.Tensor) -> torch.Tensor:
+        x = board_position.view(board_position.size(0), -1)  # Flatten
+        x = torch.relu(self.fc1(x))
+        x = torch.dropout(x, p=self.dropout_p, train=self.training)
+        logits = self.fc2(x)
+        return torch.softmax(logits, dim=1) if self.with_softmax else logits

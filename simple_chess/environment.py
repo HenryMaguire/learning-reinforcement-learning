@@ -32,7 +32,7 @@ class ChessEnv(gym.Env):
         self.black_score_weight = black_score_weight
         self.checkmate_reward = 50
         self.loss_reward = -50
-        self.check_reward = 5
+        self.check_reward = 0
         self.draw_reward = 0
         self.timestep_reward = -0.1
         self.illegal_move_reward = 0
@@ -140,7 +140,7 @@ class ChessEnv(gym.Env):
             )
         return total_reward, done
 
-    def _random_action(self, as_index: bool = False):
+    def get_random_action(self, as_index: bool = False):
         move = random.choice(list(self.board.legal_moves))
         if as_index:
             return move.from_square * 64 + move.to_square
@@ -171,7 +171,7 @@ class ChessEnv(gym.Env):
             return self._get_state(), player_reward, True, truncated, {}
 
         assert not self.board.turn
-        ai_action = self._random_action()
+        ai_action = self.get_random_action()
         capture_points = self._calculate_capture_points(ai_action)
         self.board.push(ai_action)
         ai_reward, done = self._calculate_rewards(

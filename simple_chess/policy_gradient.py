@@ -1,60 +1,14 @@
-from copy import deepcopy
-from typing import Callable
+import os
+from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from tqdm import tqdm
-from simple_chess.base_policy_model import PolicyNetwork
-from simple_chess.environment import ChessEnv
+from simple_chess.base_policy_model import ChessCNN, ChessMLP
+from simple_chess.helpers import check_significance_of_improvement, make_env, to_tensor
 from torch.optim.lr_scheduler import StepLR
-import gymnasium as gym
 from gymnasium.vector import AsyncVectorEnv
-
-# hyperparameters
-LEARNING_RATE = 1e-4
-DISCOUNT_FACTOR = 0.99
-LOAD_SAVED_MODEL = False
-
-
-def make_env(
-    max_game_length: int, white_score_weight: float, black_score_weight: float
-) -> Callable:
-    """Create a callable that creates an environment with the given parameters."""
-
-    def _init() -> gym.Env:
-        env = ChessEnv(
-            max_game_length=max_game_length,
-            white_score_weight=white_score_weight,
-            black_score_weight=black_score_weight,
-        )
-        return env
-
-    return _init
-
-
-def calculate_discounted_rewards(reward_history):
-    """Compute discounted rewards with baseline normalization."""
-    discounted_rewards = np.zeros_like(reward_history)
-    cumulative_reward = 0
-
-    for t in reversed(range(len(reward_history))):
-        cumulative_reward = cumulative_reward * DISCOUNT_FACTOR + reward_history[t]
-        discounted_rewards[t] = cumulative_reward
-
-    # Normalize rewards to help with training stability
-    discounted_rewards -= np.mean(discounted_rewards)
-    discounted_rewards /= np.std(discounted_rewards) + 1e-8
-    return discounted_rewards
-
-
-def _tensor(data, device):
-    if isinstance(data, list):
-        if isinstance(data[0], np.ndarray):
-            data = np.array(data)
-        if isinstance(data[0], torch.Tensor):
-            data = torch.stack(data)
-    return torch.tensor(data, dtype=torch.float32).to(device)
 
 
 class LossWeights(nn.Module):
@@ -62,48 +16,45 @@ class LossWeights(nn.Module):
         self,
         init_entropy_weight=0.01,
         init_invalid_weight=0.1,
-        init_gradient_weight=0.01,
     ):
         super().__init__()
         self.entropy_weight = nn.Parameter(torch.tensor(init_entropy_weight))
         self.invalid_weight = nn.Parameter(torch.tensor(init_invalid_weight))
-        self._raw_gradient_weight = nn.Parameter(
-            torch.tensor(np.log(init_gradient_weight), dtype=torch.float32)
-        )
-
-    @property
-    def gradient_weight(self):
-        return torch.exp(self._raw_gradient_weight)
 
 
 def reinforce(
     policy,
     episodes,
-    alpha=5e-4,
+    alpha=1e-4,
     gamma=0.99,
+    entropy_weight=0.02,
+    invalid_weight=1.0,
+    score_weight=0.5,
     num_envs=10,
-    batch_size=32,
-    max_gradient_norm=2.0,
+    batch_size=128,
+    epsilon=0.05,
+    max_gradient_norm=1.0,
 ):
     device = (
         torch.device("mps")
         if torch.backends.mps.is_available()
         else torch.device("cpu")
     )
-    loss_weights = LossWeights().to(device)
+    loss_weights = LossWeights(
+        init_entropy_weight=entropy_weight,
+        init_invalid_weight=invalid_weight,
+    ).to(device)
+
     policy = policy.to(device)
     optim = AdamW(list(policy.parameters()) + list(loss_weights.parameters()), lr=alpha)
-    scheduler = StepLR(optim, step_size=100, gamma=0.5)
+    scheduler = StepLR(optim, step_size=100, gamma=0.8)
 
     stats = {"PG Loss": [], "Returns": [], "Game Lengths": [], "WinLoss": []}
-    score_weight = 0.5
     game_length = 50
-    # max_game_length = 70
     max_reward = 0
+    model_wins = 0
+    total_games = 0
     for episode_batch in tqdm(range(1, episodes + 1)):
-        # if episode_batch % 20 == 0:
-        #     game_length = min(game_length + 10, max_game_length)
-
         env_fns = [
             make_env(game_length, score_weight, score_weight) for _ in range(num_envs)
         ]
@@ -113,9 +64,10 @@ def reinforce(
         batch_transitions = [[] for _ in range(num_envs)]
         while not all(dones):
             # Shape (4, 12, 8, 8)
-            position_tensor = _tensor(states, device)
-            action_probs = policy(position_tensor)
-            illegal_mask = _tensor(
+            position_tensor = to_tensor(states, device)
+            with torch.no_grad():
+                action_probs = policy(position_tensor)
+            illegal_mask = to_tensor(
                 np.array(envs.get_attr("_get_legal_moves_mask")),
                 device,
             )
@@ -129,7 +81,11 @@ def reinforce(
                     masked_action_probs = (
                         masked_action_scores[i] / masked_action_scores[i].sum()
                     )
-                    action = masked_action_probs.multinomial(1).detach()
+                    if torch.rand(1) < epsilon:
+                        action = masked_action_probs.multinomial(1).detach()
+                    else:
+                        action = masked_action_probs.argmax().detach()
+
                 actions.append(action.item())
 
             next_states, rewards, new_dones, _, _ = envs.step(actions)
@@ -153,7 +109,10 @@ def reinforce(
             mean_reward = np.mean(_rewards)
             std_reward = np.std(_rewards)
             total_reward += sum(_rewards)
-            win_loss += sum(_rewards) > 0 - sum(_rewards) <= 0
+            # Net positive reward is considered a win.
+            win_loss += int((sum(_rewards) + 5) > 0)
+            total_games += 1
+            model_wins += int((sum(_rewards) + 5) > 0)
 
             G = 0
             # Moving from the last timestep, calculate the discounted return.
@@ -168,10 +127,10 @@ def reinforce(
                 all_legal_masks.append(legal_mask_t)
 
         # Prepare tensors for training
-        states = _tensor(all_states, device)
-        actions = _tensor(all_actions, device)
-        returns = _tensor(all_returns, device)
-        legal_masks = _tensor(all_legal_masks, device)
+        states = to_tensor(all_states, device)
+        actions = to_tensor(all_actions, device)
+        returns = to_tensor(all_returns, device)
+        legal_masks = to_tensor(all_legal_masks, device)
 
         # Shuffle the data
         indices = torch.randperm(len(states))
@@ -182,6 +141,7 @@ def reinforce(
         print(
             "Rewards | Loss | PG Loss | Invalid | Entropy | gNorm | bEntropy | bInvalid | bGradient"
         )
+        num_batches = len(states) // batch_size
         for i in range(0, len(states), batch_size):
             states_batch = states[i : i + batch_size]
             # Actions taken by the current policy.
@@ -200,32 +160,68 @@ def reinforce(
             invalid_move_loss = torch.log(invalid_probs.sum(dim=1)).mean()
             total_loss = (
                 pg_loss
-                + loss_weights.invalid_weight * invalid_move_loss
-                + 0.02 * entropy_loss
+                # + loss_weights.invalid_weight * invalid_move_loss
+                + entropy_weight * entropy_loss
             )
+            # total_loss /= num_batches
             total_loss.backward()
             total_norm = torch.nn.utils.clip_grad_norm_(
                 policy.parameters(), max_norm=max_gradient_norm
             )
             print(
-                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {total_norm:.3f} | {loss_weights.entropy_weight.item():.3f} | {loss_weights.invalid_weight.item():.3f}| {loss_weights.gradient_weight.item():.3f}"
+                f"{returns_batch.mean().item():.5f} | {total_loss.item():.5f} | {pg_loss.item():.5f} | {invalid_move_loss.item():.5f} | {entropy_loss.item():.5f} | {total_norm:.3f}"
             )
             stats["PG Loss"].append(total_loss.item())
             stats["Returns"].append(returns_batch.mean().item())
-        optim.step()
-        optim.zero_grad()
+
+            optim.step()
+            optim.zero_grad()
+
         scheduler.step()
         max_reward = max(max_reward, total_reward / num_envs)
-
+        print(num_batches)
         print(
-            f"Average Reward: {total_reward / num_envs:.2f} Max Reward: {max_reward:.2f} Learning Rate: {optim.param_groups[0]['lr']:.4f} WinLoss: {win_loss}"
+            f"Average Ep. Reward: {total_reward / num_envs:.2f} Max Ep. Reward: {max_reward:.2f} Learning Rate: {optim.param_groups[0]['lr']:.4f} Ep. WinLoss: {win_loss / num_envs:.2f} Norm: {total_norm:.3f}"
         )
+        if episode_batch % 20 == 0:
+            check_significance_of_improvement(model_wins, total_games)
+            model_wins = 0
+            total_games = 0
+
     envs.close()
     return stats
 
 
+def plot_stats(stats):
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Plot PG Loss
+    ax1.set_xlabel("Steps")
+    ax1.set_ylabel("PG Loss", color="tab:blue")
+    ax1.plot(stats["PG Loss"], color="tab:blue", alpha=0.6, label="PG Loss")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+
+    # Plot Returns on secondary y-axis
+    ax2 = ax1.twinx()
+    ax2.set_ylabel("Returns", color="tab:orange")
+    ax2.plot(stats["Returns"], color="tab:orange", alpha=0.6, label="Returns")
+    ax2.tick_params(axis="y", labelcolor="tab:orange")
+
+    # Add legend
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+
+    plt.title("Training Progress")
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
-    policy_network = PolicyNetwork()
-    policy_network.load_state_dict(torch.load("pretrained_policy.pt"))
-    stats = reinforce(policy_network, 200, num_envs=10)
-    # print(stats)
+    policy_network = ChessCNN()
+    # Load a model that slightly knows what moves are legal (~40% legal move prob).
+    # policy_network.load_state_dict(torch.load("pretrained_policy.pt"))
+    num_cpus = os.cpu_count()
+    print(f"Using {num_cpus} CPUs")
+    stats = reinforce(policy_network, 2000, num_envs=num_cpus)
+    plot_stats(stats)
