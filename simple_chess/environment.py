@@ -105,10 +105,10 @@ class ChessEnv(gym.Env):
                 result_reward = (
                     self.checkmate_reward if is_white_turn else self.loss_reward
                 )
-                if is_white_turn:
-                    print("White wins")
-                else:
-                    print("Black wins")
+                # if is_white_turn:
+                #     print("White wins")
+                # else:
+                #     print("Black wins")
 
             elif self.board.is_stalemate() or self.board.is_insufficient_material():
                 print("Draw")

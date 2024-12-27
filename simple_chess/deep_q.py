@@ -14,20 +14,6 @@ from simple_chess.helpers import (
     make_env,
     to_tensor,
 )
-from torch.optim.lr_scheduler import StepLR
-from gymnasium.vector import AsyncVectorEnv
-
-
-def compute_discounted_returns(rewards, gamma, device):
-    mean_reward = np.mean(rewards)
-    std_reward = np.std(rewards) + 1e-8
-    rewards = (rewards - mean_reward) / std_reward
-    returns = []
-    G = 0
-    for reward in reversed(rewards):
-        G = reward + gamma * G
-        returns.append(G)
-    return to_tensor(returns[::-1], device)
 
 
 class ChessDeepQ:
@@ -40,7 +26,7 @@ class ChessDeepQ:
         epsilon_min=0.01,
         epsilon_decay=0.995,
         learning_rate=1e-4,
-        target_update_freq=10,
+        target_update_freq=5,
         num_envs=10,
         max_game_length=100,
         score_weight=0.5,
@@ -79,7 +65,7 @@ class ChessDeepQ:
     def select_actions(self, states, legal_moves_masks, dones):
         """Select actions for all environments simultaneously"""
         actions = []
-        states_tensor = torch.FloatTensor(states).to(self.device)
+        states_tensor = to_tensor(states, self.device)
 
         with torch.no_grad():
             q_values = self.model(states_tensor)
@@ -89,8 +75,6 @@ class ChessDeepQ:
                     actions.append(0)
                     continue
                 legal_indices = np.where(legal_moves_masks[i] == 1)[0]
-                # if len(legal_indices) == 0:
-                #     actions.append(0)
                 if random.random() < self.epsilon:
                     # Random action from legal moves
                     actions.append(np.random.choice(legal_indices))
@@ -136,12 +120,15 @@ class ChessDeepQ:
 
         with torch.no_grad():
             next_q_values = self.target_model(next_states)
-            next_q_values = next_q_values * legal_masks - 1e9 * (1 - legal_masks)
             max_next_q_values = next_q_values.max(1)[0]
             target_q_values = rewards + self.gamma * max_next_q_values * (1 - dones)
 
-        # print("current", current_q_values.squeeze(), "target", target_q_values)
-        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
+        loss_per_sample = nn.MSELoss(reduction="none")(
+            current_q_values.squeeze(), target_q_values
+        )
+        _legal_masks = legal_masks.gather(1, actions.unsqueeze(1)).squeeze()
+        loss_per_sample = loss_per_sample.masked_fill(~_legal_masks.bool(), 10)
+        loss = loss_per_sample.mean()
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -158,9 +145,14 @@ def train_deep_q_chess(
     num_envs=10,
     max_game_length=50,
     render_freq=10,
+    learning_rate=5e-4,
 ):
 
-    agent = ChessDeepQ(num_envs=num_envs, max_game_length=max_game_length)
+    agent = ChessDeepQ(
+        num_envs=num_envs,
+        max_game_length=max_game_length,
+        learning_rate=learning_rate,
+    )
     best_reward = -float("inf")
     for episode in tqdm(range(1, episodes + 1)):
         states, _ = agent.envs.reset()
@@ -186,7 +178,6 @@ def train_deep_q_chess(
 
             for i in range(num_envs):
                 if new_dones[i]:
-                    episode_rewards[i] = episode_rewards[i]
                     if win_lose_draw[i] is not None:
                         episode_win_lose_draw[i] = win_lose_draw[i]
                     dones[i] = True
@@ -198,6 +189,9 @@ def train_deep_q_chess(
             agent.update_target_network()
 
         avg_reward = np.mean(episode_rewards)
+        # Max game length is 50, timestep reward is -0.1.
+        num_positive = sum((episode_rewards + 5) > 0)
+
         if avg_reward > best_reward:
             best_reward = avg_reward
             torch.save(agent.model.state_dict(), "best_parallel_chess_model.pt")
@@ -206,6 +200,7 @@ def train_deep_q_chess(
             avg_loss = np.mean(losses) if losses else 0
             print(f"Episode {episode}/{episodes}")
             print(f"Average Reward: {avg_reward:.2f}")
+            print(f"Positive Reward Pct: {num_positive / num_envs:.2f}")
             print(f"Best Average Reward: {best_reward:.2f}")
             print(
                 f"Checkmates: {sum((episode_win_lose_draw == 1)):.2f} Losses: {sum((episode_win_lose_draw == -1)):.2f} Draws: {sum((episode_win_lose_draw == 0)):.2f}"
