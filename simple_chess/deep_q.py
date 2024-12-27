@@ -103,8 +103,8 @@ class ChessDeepQ:
                 )
             )
 
-    def train_step(self, batch_size=32):
-        if len(self.memory) < batch_size:
+    def train_step(self):
+        if len(self.memory) < self.batch_size:
             return
         batch = random.sample(self.memory, self.batch_size)
         states, actions, rewards, next_states, dones, legal_masks = zip(*batch)
@@ -146,12 +146,14 @@ def train_deep_q_chess(
     max_game_length=50,
     render_freq=10,
     learning_rate=5e-4,
+    batch_size=64,
 ):
 
     agent = ChessDeepQ(
         num_envs=num_envs,
         max_game_length=max_game_length,
         learning_rate=learning_rate,
+        batch_size=batch_size,
     )
     best_reward = -float("inf")
     for episode in tqdm(range(1, episodes + 1)):

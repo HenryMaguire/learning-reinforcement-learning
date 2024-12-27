@@ -41,8 +41,14 @@ def to_tensor(data, device):
     if isinstance(data, list):
         if isinstance(data[0], np.ndarray):
             data = np.array(data)
-        if isinstance(data[0], torch.Tensor):
+        elif isinstance(data[0], torch.Tensor):
             data = torch.stack(data)
+        else:
+            raise ValueError("Unknown data type")
+    elif isinstance(data, torch.Tensor):
+        pass
+    else:
+        data = np.array(data)
     return torch.tensor(data, dtype=torch.float32).to(device)
 
 
